@@ -1,0 +1,9 @@
+{
+  "files.exclude": {
+    "**/.pytest_cache": true,
+    "**/__pycache__": true
+  },
+  "python.createEnvironment.trigger": "off",
+  "python.terminal.activateEnvironment": true,
+  "terminal.integrated.defaultProfile.windows": "PowerShell"
+}
