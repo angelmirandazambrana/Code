@@ -1,0 +1,40 @@
+# Biblioteca: catálogo web de V:\ (Isengard) para OMV3.
+# Las rutas y el puerto se ajustan en el fichero .env (ver .env.example).
+services:
+  web:
+    build: .
+    image: biblioteca-rpg:latest
+    container_name: biblioteca-web
+    restart: unless-stopped
+    user: "${PUID:-1000}:${PGID:-100}"
+    ports:
+      - "${PUERTO:-8090}:8090"
+    environment:
+      BIBLIOTECA_RUTA_SMB: "${RUTA_SMB:-}"
+      TZ: "${TZ:-Europe/Madrid}"
+    volumes:
+      - "${BIBLIOTECA_HOST}:/biblioteca:ro"   # la biblioteca, SOLO LECTURA
+      - "${DATOS_HOST}:/datos"                # catálogo y portadas
+    mem_limit: 384m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/salud', timeout=5)"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+
+  indexador:
+    image: biblioteca-rpg:latest
+    container_name: biblioteca-indexador
+    depends_on: [web]
+    restart: unless-stopped
+    user: "${PUID:-1000}:${PGID:-100}"
+    command: ["/app/docker/indexar_periodicamente.sh"]
+    environment:
+      BIBLIOTECA_PROCESOS: "${PROCESOS:-2}"
+      INTERVALO_HORAS: "${INTERVALO_HORAS:-6}"
+      TZ: "${TZ:-Europe/Madrid}"
+    volumes:
+      - "${BIBLIOTECA_HOST}:/biblioteca:ro"
+      - "${DATOS_HOST}:/datos"
+    mem_limit: 1200m
+    cpus: "${CPUS_INDEXADOR:-2}"

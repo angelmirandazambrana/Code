@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block titulo %}{% if q %}{{ q }} · {% endif %}Biblioteca{% endblock %}
+{% block contenido %}
+<div class="disposicion">
+  <aside class="lateral" id="lateral">
+    <button class="cerrar-lateral" type="button" data-alternar-lateral aria-label="Cerrar filtros">✕</button>
+    {% for faceta, valores in facetas.items() %}
+      {% set activos = filtros.get(faceta, []) %}
+      <section class="faceta" data-faceta>
+        <h3>{{ etiquetas[faceta] }}</h3>
+        {% if valores|length > 10 %}
+          <input class="filtrar-faceta" type="search" placeholder="Filtrar {{ valores|length }}…" data-filtrar-faceta>
+        {% endif %}
+        <ul>
+          {% for valor, n in valores %}
+            <li class="{% if valor in activos %}activo{% endif %}{% if loop.index > 8 and valor not in activos %} extra{% endif %}" data-valor="{{ valor|lower }}">
+              <a href="{{ url(alternar=(faceta, valor)) }}">
+                <span class="caja" aria-hidden="true"></span>
+                <span class="valor{% if valor == sin_valor %} tenue{% endif %}">{{ valor }}{% if faceta == 'decada' and valor != sin_valor %}s{% endif %}</span>
+                <span class="n">{{ n }}</span>
+              </a>
+            </li>
+          {% endfor %}
+        </ul>
+        {% if valores|length > 8 %}<button class="ver-mas" type="button" data-ver-mas>Ver los {{ valores|length }}</button>{% endif %}
+      </section>
+    {% endfor %}
+  </aside>
+
+  <section class="resultados">
+    <nav class="migas" aria-label="Carpeta">
+      <a href="{{ url(carpeta=None) }}">Todo</a>
+      {% for nombre, enlace in migas %}<span class="sep">›</span><a href="{{ enlace }}">{{ nombre }}</a>{% endfor %}
+    </nav>
+
+    {% if subcarpetas %}
+      <div class="subcarpetas">
+        {% for nombre, n in subcarpetas[:60] %}
+          <a class="chip" href="{{ url(carpeta=(carpeta.strip('/') ~ '/' if carpeta else '') ~ nombre) }}">📁 {{ nombre }} <span class="n">{{ n }}</span></a>
+        {% endfor %}
+        {% if subcarpetas|length > 60 %}<span class="chip tenue">y {{ subcarpetas|length - 60 }} más…</span>{% endif %}
+      </div>
+    {% endif %}
+
+    <div class="barra">
+      <button class="abrir-lateral" type="button" data-alternar-lateral>Filtros{% if filtros %} ({{ filtros.values()|map('length')|sum }}){% endif %}</button>
+      <p class="recuento"><strong>{{ "{:,}".format(res.total).replace(",", ".") }}</strong> {{ "resultado" if res.total == 1 else "resultados" }}
+        {% if res.total != total_catalogo %}<span class="tenue">de {{ "{:,}".format(total_catalogo).replace(",", ".") }}</span>{% endif %}</p>
+      <form class="orden" method="get" action="/">
+        {% for faceta, valores in filtros.items() %}{% for v in valores %}<input type="hidden" name="{{ faceta }}" value="{{ v }}">{% endfor %}{% endfor %}
+        {% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}
+        {% if carpeta %}<input type="hidden" name="carpeta" value="{{ carpeta }}">{% endif %}
+        <label>Ordenar
+          <select name="orden" data-autoenviar>
+            {% for clave, nombre in ordenes.items() %}{% if clave != 'relevancia' or q %}
+              <option value="{{ clave }}" {% if clave == orden %}selected{% endif %}>{{ nombre }}</option>
+            {% endif %}{% endfor %}
+          </select>
+        </label>
+      </form>
+    </div>
+
+    {% if filtros or q %}
+      <div class="activos">
+        {% if q %}<a class="pastilla" href="{{ url(q=None) }}">“{{ q }}” ✕</a>{% endif %}
+        {% for faceta, valores in filtros.items() %}{% for v in valores %}
+          <a class="pastilla" href="{{ url(alternar=(faceta, v)) }}"><span class="tenue">{{ etiquetas[faceta] }}:</span> {{ v }} ✕</a>
+        {% endfor %}{% endfor %}
+        <a class="limpiar" href="/{% if carpeta %}?carpeta={{ carpeta|qp }}{% endif %}">Quitar filtros</a>
+      </div>
+    {% endif %}
+
+    {% if res.filas %}
+      <ul class="rejilla">
+        {% for d in res.filas %}
+          <li class="tarjeta">
+            <a href="/libro/{{ d.id }}">
+              <div class="portada"><img src="/portada/{{ d.id }}.jpg" alt="" loading="lazy" decoding="async"></div>
+              <h2 title="{{ d.titulo }}">{{ d.titulo }}</h2>
+              <p class="linea">{{ d.sistema or d.categoria or '' }}{% if d.edicion %} · {{ d.edicion }}{% endif %}</p>
+              {% set pie = [d.editorial, d.anio, (d.paginas ~ ' pág.') if d.paginas else None]|select|join(' · ') %}
+              <p class="linea tenue">{{ pie }}&nbsp;</p>
+            </a>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="vacio">No hay nada con estos filtros.</p>
+    {% endif %}
+
+    {% if res.paginas > 1 %}
+      <nav class="paginacion" aria-label="Páginas">
+        {% if pagina > 1 %}<a href="{{ url(pagina=pagina - 1) }}">‹ Anterior</a>{% endif %}
+        <span>Página {{ pagina }} de {{ res.paginas }}</span>
+        {% if pagina < res.paginas %}<a href="{{ url(pagina=pagina + 1) }}">Siguiente ›</a>{% endif %}
+      </nav>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block titulo %}Biblioteca{% endblock %}</title>
+<link rel="stylesheet" href="/static/estilo.css?v={{ version }}">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎲</text></svg>">
+</head>
+<body>
+<header class="cabecera">
+  <a class="marca" href="/"><span class="dado">⬢</span> Biblioteca</a>
+  <form class="buscador" action="/" method="get" role="search">
+    <input type="search" name="q" value="{{ q|default('') }}" placeholder="Buscar título, sistema, editorial…" autocomplete="off" aria-label="Buscar">
+    {% if carpeta %}<input type="hidden" name="carpeta" value="{{ carpeta }}">{% endif %}
+    <button type="submit">Buscar</button>
+  </form>
+</header>
+<main>{% block contenido %}{% endblock %}</main>
+<script src="/static/app.js?v={{ version }}" defer></script>
+</body>
+</html>

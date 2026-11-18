@@ -1,0 +1,11 @@
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+src = ["src"]
+
+[tool.ruff.lint]
+# re.I y dict() se leen mejor aquí; los except amplios del indexador son a propósito (PDF rotos).
+ignore = ["C408", "FURB167", "BLE001", "S110"]

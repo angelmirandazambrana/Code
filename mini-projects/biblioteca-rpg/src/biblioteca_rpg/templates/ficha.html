@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block titulo %}{{ d.titulo }} · Biblioteca{% endblock %}
+{% block contenido %}
+<nav class="migas ficha-migas" aria-label="Carpeta">
+  <a href="/">Todo</a>
+  {% for nombre, enlace in migas %}<span class="sep">›</span><a href="{{ enlace }}">{{ nombre }}</a>{% endfor %}
+</nav>
+
+<article class="ficha">
+  <div class="ficha-portada">
+    <a href="/pdf/{{ d.id }}/{{ d.nombre|qp }}" target="_blank" rel="noopener"><img src="/portada/{{ d.id }}.jpg" alt="Portada de {{ d.titulo }}"></a>
+  </div>
+  <div class="ficha-datos">
+    <p class="ficha-sistema">{% if d.sistema %}<a href="{{ filtro('sistema', d.sistema) }}">{{ d.sistema }}</a>{% else %}{{ d.categoria }}{% endif %}</p>
+    <h1>{{ d.titulo }}</h1>
+    {% if d.pdf_titulo and d.pdf_titulo|lower != d.titulo|lower %}<p class="tenue">Título interno del PDF: {{ d.pdf_titulo }}</p>{% endif %}
+
+    <div class="acciones">
+      <a class="boton principal" href="/pdf/{{ d.id }}/{{ d.nombre|qp }}" target="_blank" rel="noopener">Abrir PDF</a>
+      <a class="boton" href="/pdf/{{ d.id }}/{{ d.nombre|qp }}" download>Descargar</a>
+      {% if ruta_red %}<button class="boton" type="button" data-copiar="{{ ruta_red }}">Copiar ruta de red</button>{% endif %}
+    </div>
+
+    <dl class="datos">
+      {% for etiqueta, faceta, valor in [
+          ('Categoría', 'categoria', d.categoria), ('Formato', 'formato', d.formato),
+          ('Sistema / línea', 'sistema', d.sistema), ('Edición', 'edicion', d.edicion),
+          ('Editorial', 'editorial', d.editorial), ('Ambientación', 'ambientacion', d.ambientacion),
+          ('Tipo', 'tipo', d.tipo), ('Idioma', 'idioma', d.idioma)] if valor %}
+        <dt>{{ etiqueta }}</dt><dd><a href="{{ filtro(faceta, valor) }}">{{ valor }}</a></dd>
+      {% endfor %}
+      {% if d.anio %}<dt>Año</dt><dd>{{ d.anio }}</dd>{% endif %}
+      {% if d.pdf_autor %}<dt>Autor (PDF)</dt><dd>{{ d.pdf_autor }}</dd>{% endif %}
+      {% if d.paginas %}<dt>Páginas</dt><dd>{{ d.paginas }}</dd>{% endif %}
+      <dt>Tamaño</dt><dd>{{ d.tamano|tamano }}</dd>
+      <dt>En la biblioteca desde</dt><dd>{{ d.llegado_en|fecha }}</dd>
+      <dt>Fichero</dt><dd class="ruta">{{ d.ruta }}</dd>
+      {% if d.error %}<dt>Aviso</dt><dd class="aviso">No se pudo leer el PDF: {{ d.error }}</dd>{% endif %}
+    </dl>
+
+    <p class="externos">Buscar fuera:
+      <a href="{{ enlace_tienda }}" target="_blank" rel="noopener noreferrer">{{ nombre_tienda }} ↗</a>
+      <a href="{{ enlace_geek }}" target="_blank" rel="noopener noreferrer">{{ nombre_geek }} ↗</a>
+    </p>
+  </div>
+</article>
+
+{% if hermanos %}
+<section class="hermanos">
+  <h2>En la misma carpeta</h2>
+  <ul class="rejilla compacta">
+    {% for h in hermanos %}
+      <li class="tarjeta"><a href="/libro/{{ h.id }}">
+        <div class="portada"><img src="/portada/{{ h.id }}.jpg" alt="" loading="lazy"></div>
+        <h2 title="{{ h.titulo }}">{{ h.titulo }}</h2>
+      </a></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "biblioteca-web",
+      "runtimeExecutable": "C:/Users/angel/Documents/Code/mini-projects/biblioteca-rpg/.venv/Scripts/python.exe",
+      "runtimeArgs": ["C:/Users/angel/Documents/Code/mini-projects/biblioteca-rpg/dev_server.py"],
+      "port": 8090
+    }
+  ]
+}

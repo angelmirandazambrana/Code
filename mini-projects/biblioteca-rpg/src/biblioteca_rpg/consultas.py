@@ -1,0 +1,138 @@
+"""Búsqueda con filtros y recuento por faceta."""
+
+import re
+import sqlite3
+
+# faceta -> etiqueta en la web
+FACETAS = {
+    "categoria": "Categoría",
+    "formato": "Formato",
+    "sistema": "Sistema / línea",
+    "edicion": "Edición",
+    "editorial": "Editorial",
+    "tipo": "Tipo",
+    "ambientacion": "Ambientación",
+    "idioma": "Idioma",
+    "decada": "Década",
+}
+SIN_VALOR = "(sin indicar)"
+POR_PAGINA = 60
+
+ORDENES = {
+    "relevancia": "Relevancia",
+    "titulo": "Título",
+    "recientes": "Llegados recientemente",
+    "anio": "Año",
+    "paginas": "Nº de páginas",
+}
+
+
+def consulta_fts(texto: str) -> str | None:
+    """'shadowrun 3e core' -> '"shadowrun"* "3e"* "core"*' (todas las palabras, por prefijo)."""
+    palabras = re.findall(r"[\w&'.-]+", texto, flags=re.UNICODE)
+    palabras = [p.replace('"', "") for p in palabras if p.strip(".-'")]
+    if not palabras:
+        return None
+    return " ".join(f'"{p}"*' for p in palabras)
+
+
+def _expr(faceta: str) -> str:
+    if faceta == "decada":
+        return "CASE WHEN anio IS NULL THEN NULL ELSE (anio / 10) * 10 END"
+    return faceta
+
+
+def construir_where(filtros: dict, q: str | None, carpeta: str | None, excluir: str | None = None):
+    condiciones, params = [], []
+    if q:
+        fts = consulta_fts(q)
+        if fts:
+            condiciones.append("docs.id IN (SELECT rowid FROM docs_fts WHERE docs_fts MATCH ?)")
+            params.append(fts)
+    if carpeta:
+        carpeta = carpeta.strip("/")
+        # carpeta exacta o cualquier subcarpeta ('/' + 1 = '0')
+        condiciones.append("(carpeta = ? OR (carpeta >= ? AND carpeta < ?))")
+        params += [carpeta, carpeta + "/", carpeta + "0"]
+    for faceta, valores in filtros.items():
+        if faceta == excluir or not valores:
+            continue
+        expr = _expr(faceta)
+        partes = []
+        normales = [v for v in valores if v != SIN_VALOR]
+        if normales:
+            if faceta == "decada":
+                normales = [int(v) for v in normales if str(v).isdigit()]
+            partes.append(f"{expr} IN ({','.join('?' * len(normales))})")
+            params += normales
+        if SIN_VALOR in valores:
+            partes.append(f"{expr} IS NULL")
+        if partes:
+            condiciones.append("(" + " OR ".join(partes) + ")")
+    where = (" WHERE " + " AND ".join(condiciones)) if condiciones else ""
+    return where, params
+
+
+def buscar(con: sqlite3.Connection, filtros: dict, q: str | None, carpeta: str | None,
+           orden: str, pagina: int) -> dict:
+    where, params = construir_where(filtros, q, carpeta)
+    total = con.execute(f"SELECT COUNT(*) FROM docs{where}", params).fetchone()[0]
+
+    if orden == "relevancia" and q and consulta_fts(q):
+        # bm25 con más peso al título que a la carpeta
+        sql_orden = (
+            "ORDER BY (SELECT bm25(docs_fts, 10.0, 2.0, 4.0, 1.0) FROM docs_fts "
+            "WHERE docs_fts MATCH ? AND rowid = docs.id), titulo COLLATE NOCASE"
+        )
+        params_orden = [consulta_fts(q)]
+    else:
+        sql_orden = {
+            "recientes": "ORDER BY llegado_en DESC, id DESC",
+            "anio": "ORDER BY anio IS NULL, anio, titulo COLLATE NOCASE",
+            "paginas": "ORDER BY paginas IS NULL, paginas DESC",
+        }.get(orden, "ORDER BY titulo COLLATE NOCASE")
+        params_orden = []
+    desplaz = (max(pagina, 1) - 1) * POR_PAGINA
+    filas = con.execute(
+        f"SELECT * FROM docs{where} {sql_orden} LIMIT {POR_PAGINA} OFFSET {desplaz}",
+        params + params_orden,
+    ).fetchall()
+    return {"total": total, "filas": filas, "paginas": max(1, -(-total // POR_PAGINA))}
+
+
+def facetas(con: sqlite3.Connection, filtros: dict, q: str | None, carpeta: str | None) -> dict:
+    """Recuentos de cada faceta, aplicando todos los filtros menos el de la propia faceta."""
+    res = {}
+    for faceta in FACETAS:
+        where, params = construir_where(filtros, q, carpeta, excluir=faceta)
+        expr = _expr(faceta)
+        filas = con.execute(
+            f"SELECT {expr} AS v, COUNT(*) AS n FROM docs{where} GROUP BY v ORDER BY n DESC",
+            params,
+        ).fetchall()
+        valores = [(SIN_VALOR if f["v"] is None else str(f["v"]), f["n"]) for f in filas]
+        # Una faceta con un solo valor "(sin indicar)" no aporta nada.
+        if len(valores) == 1 and valores[0][0] == SIN_VALOR and not filtros.get(faceta):
+            continue
+        if valores:
+            res[faceta] = valores
+    return res
+
+
+def subcarpetas(con: sqlite3.Connection, filtros: dict, q: str | None, carpeta: str | None) -> list:
+    """Hijos directos de la carpeta actual (o de la raíz), con su recuento."""
+    where, params = construir_where(filtros, q, carpeta)
+    base = (carpeta or "").strip("/")
+    corte = len(base) + 1 if base else 0
+    filas = con.execute(f"SELECT carpeta, COUNT(*) AS n FROM docs{where} GROUP BY carpeta", params)
+    hijos: dict[str, int] = {}
+    for f in filas:
+        c = f["carpeta"] or ""
+        if base and c == base:
+            continue
+        resto = c[corte:]
+        if not resto:
+            continue
+        hijo = resto.split("/", 1)[0]
+        hijos[hijo] = hijos.get(hijo, 0) + f["n"]
+    return sorted(hijos.items(), key=lambda x: x[0].lower())
