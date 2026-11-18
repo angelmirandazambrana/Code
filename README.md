@@ -1,19 +1,19 @@
-﻿# Code
+# Code
 
-Carpeta base para mini-proyectos y pruebas rÃ¡pidas.
+Carpeta base para mini-proyectos y pruebas rápidas.
 
 ## Estructura
 
-- `mini-projects/`: proyectos activos y pequeÃ±os experimentos
+- `mini-projects/`: proyectos activos y pequeños experimentos
 - `templates/`: referencias o plantillas reutilizables
 - `archive/`: proyectos viejos o pausados
 - `mini-projects/Bookmarks management/`: proyecto actual ya existente
 
 ## Flujo recomendado desde VS Code
 
-### OpciÃ³n 1: abrir la carpeta base
+### Opción 1: abrir la carpeta base
 
-Ãšsala cuando quieras crear proyectos nuevos o moverte entre varios mini-proyectos.
+Úsala cuando quieras crear proyectos nuevos o moverte entre varios mini-proyectos.
 
 1. Abre VS Code
 2. Ve a `File > Open Folder...`
@@ -31,9 +31,9 @@ Carpeta base para mini-proyectos y pruebas rÃ¡pidas.
 C:\Users\angel\Documents\Code\mini-projects\nombre-del-proyecto
 ```
 
-### OpciÃ³n 2: abrir directamente un proyecto
+### Opción 2: abrir directamente un proyecto
 
-Ãšsala cuando ya vayas a trabajar centrado en un solo mini-proyecto.
+Úsala cuando ya vayas a trabajar centrado en un solo mini-proyecto.
 
 1. Abre VS Code
 2. Ve a `File > Open Folder...`
@@ -43,7 +43,7 @@ C:\Users\angel\Documents\Code\mini-projects\nombre-del-proyecto
 C:\Users\angel\Documents\Code\mini-projects\nombre-del-proyecto
 ```
 
-VS Code usarÃ¡ el `.venv` local del proyecto.
+VS Code usará el `.venv` local del proyecto.
 
 ## Crear un mini-proyecto
 
@@ -60,7 +60,7 @@ Esto crea:
 - `tests/`
 - `requirements.txt`
 - `.vscode/settings.json`
-- archivos base para arrancar rÃ¡pido
+- archivos base para arrancar rápido
 
 ## Comandos habituales
 
@@ -101,23 +101,23 @@ python -m ruff check .
 python -m ruff format .
 ```
 
-## CuÃ¡ndo abrir `Code` y cuÃ¡ndo abrir un proyecto
+## Cuándo abrir `Code` y cuándo abrir un proyecto
 
 Abre `C:\Users\angel\Documents\Code` si:
 
 - vas a crear varios proyectos
-- estÃ¡s organizando carpetas
+- estás organizando carpetas
 - quieres navegar entre mini-proyectos
 
 Abre directamente la carpeta de un proyecto si:
 
 - vas a trabajar varias horas en uno solo
 - quieres menos ruido visual
-- quieres que VS Code se centre en un Ãºnico `.venv`
+- quieres que VS Code se centre en un único `.venv`
 
 ## Notas
 
-- Python estÃ¡ instalado en este equipo.
+- Python está instalado en este equipo.
 - VS Code ya tiene soporte Python, Pylance y Ruff.
 - Cada mini-proyecto usa su propio `.venv` para evitar mezclas.
 - Si algo no reconoce `python` en una terminal vieja, abre una terminal nueva dentro de VS Code.
