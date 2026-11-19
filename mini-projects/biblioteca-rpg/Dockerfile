@@ -6,6 +6,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     BIBLIOTECA_RAIZ=/biblioteca \
     BIBLIOTECA_DATOS=/datos
 
+# bsdtar (libarchive): descomprimir zip, rar y 7z de la carpeta de entrada.
+RUN apt-get update     && apt-get install -y --no-install-recommends libarchive-tools     && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

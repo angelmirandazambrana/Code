@@ -40,3 +40,23 @@ services:
       - "${DATOS_HOST}:/datos"
     mem_limit: 1200m
     cpus: "${CPUS_INDEXADOR:-2}"
+
+  # El ÚNICO servicio con escritura en la biblioteca: vigila _Inbox, descomprime, propone
+  # carpeta y mueve lo aprobado (nunca sobrescribe ni borra; registro en _Reorganizacion).
+  clasificador:
+    image: biblioteca-rpg:latest
+    container_name: biblioteca-clasificador
+    depends_on: [web]
+    restart: unless-stopped
+    user: "${PUID:-1000}:${PGID:-100}"
+    command: ["nice", "-n", "10", "python", "-m", "biblioteca_rpg.entrada"]
+    environment:
+      BIBLIOTECA_ENTRADA: "${ENTRADA:-_Inbox}"
+      CLASIFICADOR_AUTO: "${CLASIFICADOR_AUTO:-0.9}"
+      BIBLIOTECA_PROCESOS: "1"
+      TZ: "${TZ:-Europe/Madrid}"
+    volumes:
+      - "${BIBLIOTECA_HOST}:/biblioteca"      # lectura y ESCRITURA
+      - "${DATOS_HOST}:/datos"
+    mem_limit: 768m
+    cpus: "1"

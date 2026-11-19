@@ -23,6 +23,10 @@ class Config:
     # Ruta de red para mostrar en la ficha ("copiar ruta"), p. ej. \\OPENMEDIAVAULT3\Isengard
     ruta_smb: str = field(default_factory=lambda: os.environ.get("BIBLIOTECA_RUTA_SMB", ""))
     procesos: int = field(default_factory=lambda: int(os.environ.get("BIBLIOTECA_PROCESOS", "2")))
+    # Carpeta (relativa a la raíz) donde llegan los PDF nuevos para clasificar.
+    entrada: str = field(default_factory=lambda: os.environ.get("BIBLIOTECA_ENTRADA", "_Inbox"))
+    # Confianza mínima para mover sin preguntar (0 = siempre se revisa a mano).
+    auto: float = field(default_factory=lambda: float(os.environ.get("CLASIFICADOR_AUTO", "0.9")))
 
     @property
     def db(self) -> Path:

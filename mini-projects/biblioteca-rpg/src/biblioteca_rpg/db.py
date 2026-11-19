@@ -65,6 +65,28 @@ CREATE TABLE IF NOT EXISTS extra (
 );
 CREATE INDEX IF NOT EXISTS ix_extra_estado ON extra(fuente, estado);
 
+-- Lo que llega a la carpeta de entrada (_Inbox): un fichero o una carpeta = un lote.
+-- estado: nuevo (sin analizar), pendiente (revisar), aprobado (en cola para mover),
+--         movido, descartado (movido a _Duplicados), desaparecido (lo quitó otro), error.
+CREATE TABLE IF NOT EXISTS entrada (
+    id INTEGER PRIMARY KEY,
+    nombre TEXT NOT NULL,               -- nombre con el que llegó
+    ruta_actual TEXT NOT NULL,          -- relativa a la raíz, donde está ahora
+    es_carpeta INTEGER NOT NULL DEFAULT 0,
+    tamano INTEGER, n_pdfs INTEGER, paginas INTEGER,
+    pdf_titulo TEXT, editorial TEXT, publicado INTEGER,
+    portada INTEGER NOT NULL DEFAULT 0,
+    duplicado_de INTEGER,               -- docs.id idéntico (mismo SHA-256)
+    duplicados INTEGER NOT NULL DEFAULT 0,  -- cuántos de sus PDF ya están en la biblioteca
+    propuesta TEXT, confianza REAL, apoyos INTEGER, alternativas TEXT,
+    estado TEXT NOT NULL DEFAULT 'nuevo',
+    destino TEXT, nuevo_nombre TEXT,
+    auto INTEGER NOT NULL DEFAULT 0,    -- 1 si lo movió el clasificador sin preguntar
+    nota TEXT,
+    llegado_en INTEGER, decidido_en INTEGER, movido_en INTEGER
+);
+CREATE INDEX IF NOT EXISTS ix_entrada_estado ON entrada(estado);
+
 -- Respuestas de la API de RPGGeek/BGG ya pedidas (para no repetir consultas).
 CREATE TABLE IF NOT EXISTS geek_cache (
     clave TEXT PRIMARY KEY,

@@ -33,3 +33,23 @@ document.querySelectorAll("[data-filtrar-faceta]").forEach((input) => {
     });
   });
 });
+
+// Destino del clasificador: sugerencias de carpetas mientras se escribe.
+document.querySelectorAll("[data-buscar-carpeta]").forEach((input) => {
+  let temporizador;
+  const lista = document.getElementById(input.getAttribute("list"));
+  input.addEventListener("input", () => {
+    const radio = input.closest(".opcion")?.querySelector("input[type=radio]");
+    if (radio) radio.checked = true;
+    clearTimeout(temporizador);
+    temporizador = setTimeout(async () => {
+      const q = input.value.trim();
+      if (q.length < 2 || !lista) return;
+      try {
+        const r = await fetch("/api/carpetas?q=" + encodeURIComponent(q));
+        const carpetas = await r.json();
+        lista.replaceChildren(...carpetas.map((c) => Object.assign(document.createElement("option"), { value: c })));
+      } catch (_) { /* sin sugerencias */ }
+    }, 200);
+  });
+});

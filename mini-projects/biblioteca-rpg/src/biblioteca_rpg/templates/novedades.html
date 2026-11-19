@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block titulo %}Novedades · Biblioteca{% endblock %}
+{% block contenido %}
+<section class="novedades">
+  <h1>Novedades</h1>
+  <p class="tenue">Lo que ha entrado en la biblioteca en los últimos {{ dias }} días{% if total %} ({{ total }}{% if total >= 240 %} o más{% endif %}){% endif %}.
+    Para cambiar algo de sitio, usa «Corregir» en <a href="/entrada">Entrada</a>.</p>
+
+  {% if auto %}
+    <div class="geek">
+      <p><strong>Clasificados automáticamente:</strong> revisa que estén bien.</p>
+      <ul class="lista-simple">
+        {% for e in auto %}<li><span class="ruta">{{ e.ruta_actual }}</span> <span class="tenue">· {{ e.movido_en|fecha }}</span></li>{% endfor %}
+      </ul>
+      <p><a href="/entrada">Corregir alguno →</a></p>
+    </div>
+  {% endif %}
+
+  {% if not grupos %}<p class="vacio">Todavía no ha llegado nada nuevo.</p>{% endif %}
+  {% for dia, docs in grupos %}
+    <h2 class="dia">{{ dia }} <span class="n">{{ docs|length }}</span></h2>
+    <ul class="rejilla">
+      {% for d in docs %}
+        <li class="tarjeta">
+          <a href="/libro/{{ d.id }}">
+            <div class="portada"><img src="/portada/{{ d.id }}.jpg" alt="" loading="lazy" decoding="async"></div>
+            <h2 title="{{ d.titulo }}">{{ d.titulo }}</h2>
+            <p class="linea">{{ d.sistema or d.categoria or '' }}{% if d.edicion %} · {{ d.edicion }}{% endif %}</p>
+            <p class="linea tenue" title="{{ d.carpeta }}">{{ d.carpeta }}</p>
+          </a>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endfor %}
+</section>
+{% endblock %}

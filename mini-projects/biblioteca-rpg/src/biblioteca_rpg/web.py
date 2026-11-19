@@ -8,8 +8,8 @@ import time
 from pathlib import Path
 from urllib.parse import quote_plus, urlencode
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
+from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -17,6 +17,7 @@ from . import config as config_mod
 from .consultas import FACETAS, ORDENES, SIN_VALOR, buscar, facetas, subcarpetas
 from .db import conectar
 from .enriquecer import aplicar
+from .entrada import DUPLICADOS, destino_valido, ruta_portada_entrada
 from .indexador import ruta_portada
 
 AQUI = Path(__file__).parent
@@ -57,6 +58,8 @@ plantillas.env.filters["qp"] = quote_plus
 plantillas.env.globals["version"] = str(int(time.time()))
 plantillas.env.globals["pendientes_revisar"] = lambda: _con().execute(
     "SELECT COUNT(*) FROM extra WHERE fuente='geek' AND estado='pendiente'").fetchone()[0]
+plantillas.env.globals["pendientes_entrada"] = lambda: _con().execute(
+    "SELECT COUNT(*) FROM entrada WHERE estado IN ('pendiente', 'error')").fetchone()[0]
 NOMBRE_FUENTE = {"pdf": "el PDF", "rpgitem": "RPGGeek", "boardgame": "BoardGameGeek"}
 
 
@@ -222,6 +225,121 @@ def decidir(doc_id: int, accion: str, ref: int | None = None, volver: str = "/re
         aplicar(con, [doc_id])
     destino = volver if volver.startswith("/") and not volver.startswith("//") else "/revisar"
     return RedirectResponse(destino, status_code=303)
+
+
+# --- Entrada (_Inbox) y novedades ---------------------------------------------------
+
+@app.get("/entrada", response_class=HTMLResponse)
+def entrada(request: Request):
+    con = _con()
+
+    def lista(sql, *params):
+        out = []
+        for f in con.execute(sql, params):
+            e = dict(f)
+            e["alternativas"] = json.loads(e["alternativas"] or "[]")
+            out.append(e)
+        return out
+
+    return plantillas.TemplateResponse(request, "entrada.html", {
+        "pendientes": lista("SELECT * FROM entrada WHERE estado IN ('pendiente', 'error') ORDER BY llegado_en, id"),
+        "en_cola": lista("SELECT * FROM entrada WHERE estado IN ('nuevo', 'aprobado') ORDER BY id"),
+        "recientes": lista("SELECT * FROM entrada WHERE estado IN ('movido', 'descartado') "
+                           "ORDER BY movido_en DESC LIMIT 40"),
+        "carpeta_entrada": cfg.entrada, "auto": cfg.auto, "duplicados": DUPLICADOS,
+    })
+
+
+@app.post("/entrada/{entrada_id}")
+def decidir_entrada(entrada_id: int, accion: str = Form(...), destino: str = Form(""),
+                    destino_otra: str = Form(""), nombre: str = Form("")):
+    """La web solo anota la decisión; el clasificador (el único que escribe en la biblioteca) la ejecuta."""
+    con = _con()
+    e = con.execute("SELECT estado FROM entrada WHERE id=?", (entrada_id,)).fetchone()
+    if not e:
+        raise HTTPException(404, "No existe")
+    if e["estado"] in ("nuevo", "aprobado", "desaparecido"):
+        raise HTTPException(409, "Ahora mismo no se puede cambiar")
+    ahora = int(time.time())
+    if accion == "reintentar":
+        cambios = ("nuevo", None, None, 0)
+    elif accion == "descartar":
+        cambios = ("aprobado", DUPLICADOS, None, 0)
+    elif accion == "mover":
+        elegido = destino_otra if destino == "__otra" or (destino_otra.strip() and not destino) else destino
+        valido = destino_valido(cfg, elegido)
+        if not valido:
+            raise HTTPException(400, f"Carpeta no válida: «{elegido}». Tiene que empezar por "
+                                     f"{', '.join(cfg.areas)}.")
+        limpio = nombre.strip()
+        if limpio and ("/" in limpio or "\\" in limpio or limpio.startswith(".")):
+            raise HTTPException(400, "Nombre no válido")
+        cambios = ("aprobado", valido, limpio or None, 0)
+    else:
+        raise HTTPException(400, "Acción desconocida")
+    with con:
+        con.execute("UPDATE entrada SET estado=?, destino=?, nuevo_nombre=?, auto=?, decidido_en=?, nota=NULL "
+                    "WHERE id=?", (*cambios, ahora, entrada_id))
+    return RedirectResponse("/entrada", status_code=303)
+
+
+@app.get("/entrada/{entrada_id}/portada.jpg")
+def portada_entrada(entrada_id: int):
+    ruta = ruta_portada_entrada(cfg, entrada_id)
+    if ruta.is_file():
+        return FileResponse(ruta, media_type="image/jpeg", headers={"Cache-Control": "max-age=3600"})
+    return Response(PORTADA_VACIA, media_type="image/svg+xml", headers={"Cache-Control": "max-age=60"})
+
+
+@app.get("/entrada/{entrada_id}/pdf")
+def pdf_entrada(entrada_id: int):
+    e = _con().execute("SELECT ruta_actual FROM entrada WHERE id=?", (entrada_id,)).fetchone()
+    if not e:
+        raise HTTPException(404, "No existe")
+    raiz = cfg.raiz.resolve()
+    ruta = (raiz / e["ruta_actual"]).resolve()
+    if raiz not in ruta.parents or not ruta.exists():
+        raise HTTPException(404, "Ya no está ahí")
+    if ruta.is_dir():
+        pdfs = [p for p in ruta.rglob("*") if p.is_file() and p.suffix.lower() == ".pdf"]
+        if not pdfs:
+            raise HTTPException(404, "No hay PDF dentro")
+        ruta = max(pdfs, key=lambda p: p.stat().st_size)
+    return FileResponse(ruta, media_type="application/pdf", filename=ruta.name, content_disposition_type="inline")
+
+
+@app.get("/api/carpetas")
+def api_carpetas(q: str = ""):
+    """Carpetas de la biblioteca que contienen el texto (para elegir destino)."""
+    q = q.strip()
+    if len(q) < 2:
+        return JSONResponse([])
+    filas = _con().execute(
+        r"SELECT carpeta, COUNT(*) AS n FROM docs WHERE carpeta LIKE ? AND carpeta NOT LIKE '%/\_%' ESCAPE '\' "
+        "GROUP BY carpeta ORDER BY n DESC LIMIT 25", (f"%{q}%",)).fetchall()
+    return JSONResponse([f["carpeta"] for f in filas])
+
+
+@app.get("/novedades", response_class=HTMLResponse)
+def novedades(request: Request, dias: int = 30):
+    con = _con()
+    # La primera indexación metió toda la biblioteca de golpe: eso no son novedades.
+    primera = con.execute("SELECT MIN(llegado_en) FROM docs").fetchone()[0] or 0
+    desde = max(primera + 86400, int(time.time()) - dias * 86400)
+    filas = con.execute("SELECT * FROM docs WHERE llegado_en >= ? ORDER BY llegado_en DESC, id DESC LIMIT 240",
+                        (desde,)).fetchall()
+    grupos: list = []
+    for d in filas:
+        dia = _fecha(d["llegado_en"])
+        if not grupos or grupos[-1][0] != dia:
+            grupos.append((dia, []))
+        grupos[-1][1].append(d)
+    auto = con.execute("SELECT id, nombre, ruta_actual, destino, movido_en FROM entrada "
+                       "WHERE auto=1 AND estado='movido' AND movido_en >= ? ORDER BY movido_en DESC LIMIT 50",
+                       (desde,)).fetchall()
+    return plantillas.TemplateResponse(request, "novedades.html", {
+        "grupos": grupos, "total": len(filas), "dias": dias, "auto": auto,
+    })
 
 
 @app.get("/portada/{doc_id}.jpg")

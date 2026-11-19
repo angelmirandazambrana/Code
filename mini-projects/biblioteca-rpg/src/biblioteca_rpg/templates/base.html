@@ -15,8 +15,13 @@
     {% if carpeta %}<input type="hidden" name="carpeta" value="{{ carpeta }}">{% endif %}
     <button type="submit">Buscar</button>
   </form>
-  {% set n_revisar = pendientes_revisar() %}
-  {% if n_revisar %}<a class="enlace-revisar" href="/revisar">Revisar <span class="globo">{{ n_revisar }}</span></a>{% endif %}
+  <nav class="menu">
+    {% set n_entrada = pendientes_entrada() %}
+    <a href="/entrada">Entrada{% if n_entrada %} <span class="globo">{{ n_entrada }}</span>{% endif %}</a>
+    <a href="/novedades">Novedades</a>
+    {% set n_revisar = pendientes_revisar() %}
+    {% if n_revisar %}<a href="/revisar">Revisar <span class="globo">{{ n_revisar }}</span></a>{% endif %}
+  </nav>
 </header>
 <main>{% block contenido %}{% endblock %}</main>
 <script src="/static/app.js?v={{ version }}" defer></script>

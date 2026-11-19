@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block titulo %}Entrada · Biblioteca{% endblock %}
+{% block contenido %}
+<section class="entrada">
+  <h1>Entrada</h1>
+  <p class="tenue">
+    Lo que llega a <code>{{ carpeta_entrada }}</code> se analiza solo en un par de minutos.
+    {% if auto %}Lo que está muy claro (≥ {{ (auto * 100)|round|int }}% y varios libros parecidos de acuerdo) se mueve sin preguntar y sale en <a href="/novedades">Novedades</a>;{% endif %}
+    lo dudoso espera aquí. Nunca se borra nada: lo descartado va a <code>{{ duplicados }}</code>.
+  </p>
+
+  <h2>Por revisar <span class="n">{{ pendientes|length }}</span></h2>
+  {% if not pendientes %}<p class="vacio">Nada pendiente.</p>{% endif %}
+  {% for e in pendientes %}
+    <article class="lote{% if e.estado == 'error' %} con-error{% endif %}">
+      <a class="lote-portada" href="/entrada/{{ e.id }}/pdf" target="_blank" rel="noopener"><img src="/entrada/{{ e.id }}/portada.jpg" alt="" loading="lazy"></a>
+      <div class="lote-datos">
+        <h3>{% if e.es_carpeta %}📁 {% endif %}{{ e.nombre }}</h3>
+        <p class="tenue">
+          {{ [e.tamano|tamano,
+              (e.n_pdfs ~ ' PDF') if e.es_carpeta and e.n_pdfs else None,
+              (e.paginas ~ ' pág.') if e.paginas else None,
+              e.editorial, e.publicado]|select|join(' · ') }}
+          {% if e.pdf_titulo and e.pdf_titulo != e.nombre %}<br>Título interno: {{ e.pdf_titulo }}{% endif %}
+        </p>
+        {% if e.estado == 'error' %}<p class="aviso">No se pudo procesar: {{ e.nota }}</p>{% endif %}
+        {% if e.duplicado_de %}
+          <p class="aviso">⚠ {% if e.n_pdfs and e.duplicados < e.n_pdfs %}{{ e.duplicados }} de {{ e.n_pdfs }} PDF ya están{% else %}Ya está{% endif %}
+            en la biblioteca: <a href="/libro/{{ e.duplicado_de }}" target="_blank">ver el que tienes</a></p>
+        {% endif %}
+        <form class="decision" method="post" action="/entrada/{{ e.id }}">
+          <fieldset>
+            <legend>¿A qué carpeta?</legend>
+            {% for carpeta, pct in e.alternativas %}
+              <label class="opcion"><input type="radio" name="destino" value="{{ carpeta }}" {% if loop.first %}checked{% endif %}>
+                <span class="ruta">{{ carpeta }}</span> <span class="confianza">{{ pct }}%</span></label>
+            {% endfor %}
+            <label class="opcion otra"><input type="radio" name="destino" value="__otra" {% if not e.alternativas %}checked{% endif %}>
+              <input type="text" name="destino_otra" list="carpetas-{{ e.id }}" placeholder="Otra carpeta: escribe para buscar (p. ej. RPG/Shadowrun)" data-buscar-carpeta autocomplete="off">
+              <datalist id="carpetas-{{ e.id }}"></datalist>
+            </label>
+          </fieldset>
+          <label class="renombrar">Nombre al moverlo <input type="text" name="nombre" placeholder="{{ e.nombre }}"></label>
+          <div class="acciones">
+            <button class="boton principal" type="submit" name="accion" value="mover">Mover</button>
+            <button class="boton" type="submit" name="accion" value="descartar" formnovalidate>Descartar</button>
+            {% if e.estado == 'error' %}<button class="boton" type="submit" name="accion" value="reintentar">Reintentar</button>{% endif %}
+          </div>
+        </form>
+      </div>
+    </article>
+  {% endfor %}
+
+  {% if en_cola %}
+    <h2>Analizando o en cola <span class="n">{{ en_cola|length }}</span></h2>
+    <ul class="lista-simple">
+      {% for e in en_cola %}
+        <li>{{ e.nombre }} <span class="tenue">→ {{ e.destino or 'analizando…' }}{% if e.auto %} (automático){% endif %}</span></li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  {% if recientes %}
+    <h2>Movidos hace poco</h2>
+    <ul class="lista-simple">
+      {% for e in recientes %}
+        <li>
+          <span class="ruta">{{ e.ruta_actual }}</span>
+          <span class="tenue">· {{ e.movido_en|fecha }}{% if e.auto %} · automático{% endif %}{% if e.estado == 'descartado' %} · descartado{% endif %}{% if e.nota %} · {{ e.nota }}{% endif %}</span>
+          <details class="corregir"><summary>Corregir</summary>
+            <form method="post" action="/entrada/{{ e.id }}">
+              <input type="hidden" name="destino" value="__otra">
+              <input type="text" name="destino_otra" list="carpetas-r{{ e.id }}" placeholder="Nueva carpeta" data-buscar-carpeta autocomplete="off" required>
+              <datalist id="carpetas-r{{ e.id }}"></datalist>
+              <button class="boton mini" type="submit" name="accion" value="mover">Mover allí</button>
+            </form>
+          </details>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+</section>
+{% endblock %}
