@@ -3,6 +3,8 @@
 import re
 import sqlite3
 
+from .codigos import orden as orden_codigo
+
 # faceta -> etiqueta en la web
 FACETAS = {
     "categoria": "Categoría",
@@ -25,7 +27,11 @@ ORDENES = {
     "recientes": "Llegados recientemente",
     "anio": "Año",
     "paginas": "Nº de páginas",
+    "codigo": "Código de editorial",
 }
+CODIGO_ORDEN = "COALESCE(codigo_orden, ext_codigo_orden)"
+# "MGP40039", "mgp 40039", "TSR-9123": una búsqueda que es un código.
+RE_BUSCA_CODIGO = re.compile(r"^\s*([A-Za-z]{2,4}7?)[ _#.-]?(\d{1,6}[A-Za-z]?)\s*$")
 
 
 def consulta_fts(texto: str) -> str | None:
@@ -50,7 +56,15 @@ def construir_where(filtros: dict, q: str | None, carpeta: str | None, excluir: 
     condiciones, params = [], []
     if q:
         fts = consulta_fts(q)
-        if fts:
+        m = RE_BUSCA_CODIGO.match(q)
+        if fts and m:
+            # También por el código guardado (puede venir del PDF y no estar en el nombre).
+            # Se compara la clave de orden: "DCC 71" encuentra "DCC071".
+            clave = orden_codigo((m.group(1) + m.group(2)).upper())
+            condiciones.append("(docs.id IN (SELECT rowid FROM docs_fts WHERE docs_fts MATCH ?) "
+                               "OR codigo_orden = ? OR ext_codigo_orden = ?)")
+            params += [fts, clave, clave]
+        elif fts:
             condiciones.append("docs.id IN (SELECT rowid FROM docs_fts WHERE docs_fts MATCH ?)")
             params.append(fts)
     if carpeta:
@@ -108,6 +122,8 @@ def buscar(con: sqlite3.Connection, filtros: dict, q: str | None, carpeta: str |
             "recientes": "ORDER BY llegado_en DESC, id DESC",
             "anio": "ORDER BY COALESCE(publicado, anio) IS NULL, COALESCE(publicado, anio), titulo COLLATE NOCASE",
             "paginas": "ORDER BY paginas IS NULL, paginas DESC",
+            # Los que no tienen código, al final; los que sí, por prefijo y número.
+            "codigo": f"ORDER BY {CODIGO_ORDEN} IS NULL, {CODIGO_ORDEN}, titulo COLLATE NOCASE",
         }.get(orden, "ORDER BY titulo COLLATE NOCASE")
         params_orden = []
     desplaz = (max(pagina, 1) - 1) * POR_PAGINA

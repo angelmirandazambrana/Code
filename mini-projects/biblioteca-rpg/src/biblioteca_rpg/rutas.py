@@ -13,6 +13,8 @@ Todo es heurístico: lo que no se reconoce queda vacío y la carpeta sigue siend
 import re
 from dataclasses import asdict, dataclass
 
+from . import codigos
+
 CATEGORIAS = {
     "RPG": "Rol",
     "Wargames": "Wargames",
@@ -101,6 +103,8 @@ class Datos:
     ambientacion: str | None = None
     tipo: str | None = None
     idioma: str | None = None
+    codigo: str | None = None          # código de catálogo de la editorial (codigos.py)
+    codigo_orden: str | None = None
 
     def dict(self) -> dict:
         return asdict(self)
@@ -216,4 +220,7 @@ def analizar(ruta: str) -> Datos:
         if patron.search(texto):
             d.idioma = idioma
             break
+
+    d.codigo = codigos.del_nombre(nombre, d.carpeta)
+    d.codigo_orden = codigos.orden(d.codigo)
     return d

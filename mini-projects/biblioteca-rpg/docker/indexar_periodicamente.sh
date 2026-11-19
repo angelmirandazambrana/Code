@@ -5,13 +5,15 @@
 #   1. recorrer la biblioteca y actualizar el catálogo
 #   2. portadas pendientes
 #   3. año, editorial e ISBN del texto de los PDF
-#   4. RPGGeek/BGG (solo si hay BGG_TOKEN), como mucho GEEK_MINUTOS por pasada
+#   4. código de catálogo de la editorial en el texto de los PDF (si el nombre no lo trae)
+#   5. RPGGeek/BGG (solo si hay BGG_TOKEN), como mucho GEEK_MINUTOS por pasada
 INTERVALO_HORAS="${INTERVALO_HORAS:-6}"
 while true; do
     echo "=== $(date '+%Y-%m-%d %H:%M') indexando ==="
     nice -n 19 python -m biblioteca_rpg.indexador --sin-portadas ${INDEXADOR_ARGS:-}
     nice -n 19 python -m biblioteca_rpg.indexador --solo-portadas ${INDEXADOR_ARGS:-}
     nice -n 19 python -m biblioteca_rpg.enriquecer pdf
+    nice -n 19 python -m biblioteca_rpg.enriquecer codigos
     if [ -n "${BGG_TOKEN:-}" ]; then
         nice -n 19 python -m biblioteca_rpg.enriquecer geek --minutos "${GEEK_MINUTOS:-240}"
     fi

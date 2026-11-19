@@ -5,7 +5,7 @@ from pathlib import Path
 
 CAMPOS_RUTA = [
     "carpeta", "nombre", "titulo", "categoria", "formato", "sistema", "edicion",
-    "editorial", "anio", "ambientacion", "tipo", "idioma",
+    "editorial", "anio", "ambientacion", "tipo", "idioma", "codigo", "codigo_orden",
 ]
 
 ESQUEMA = """
@@ -133,6 +133,10 @@ COLUMNAS_EXTRA = {
     "geek_tipo": "TEXT",         # rpgitem | boardgame
     "origen": "TEXT",            # JSON {campo: fuente}
     "editorial_unif": "TEXT",    # editorial con el nombre unificado (ver editoriales.py)
+    "codigo": "TEXT",            # código de catálogo de la editorial, del nombre del fichero
+    "codigo_orden": "TEXT",      # el mismo, con el número alineado para ordenar (codigos.orden)
+    "ext_codigo": "TEXT",        # código sacado del texto del PDF, si el nombre no lo tiene
+    "ext_codigo_orden": "TEXT",
 }
 
 # Editorial unificada: forma -> nombre (lo rellena editoriales.recalcular) y disparadores que
@@ -142,6 +146,8 @@ _UNIF = f"COALESCE((SELECT nombre FROM editorial_alias WHERE forma = {_EDITORIAL
 ESQUEMA_EDITORIALES = f"""
 CREATE TABLE IF NOT EXISTS editorial_alias (forma TEXT PRIMARY KEY, nombre TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS ix_editorial_unif ON docs(editorial_unif);
+CREATE INDEX IF NOT EXISTS ix_codigo_orden ON docs(codigo_orden);
+CREATE INDEX IF NOT EXISTS ix_ext_codigo_orden ON docs(ext_codigo_orden);
 CREATE TRIGGER IF NOT EXISTS docs_editorial_ai AFTER INSERT ON docs BEGIN
     UPDATE docs SET editorial_unif = {_UNIF} WHERE id = new.id;
 END;

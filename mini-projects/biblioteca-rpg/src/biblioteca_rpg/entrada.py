@@ -15,6 +15,7 @@ import errno
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -23,7 +24,7 @@ from pathlib import Path
 
 from . import config as config_mod
 from . import texto_pdf
-from .clasificador import es_seguro, palabras, proponer
+from .clasificador import VECINOS, es_seguro, palabras, proponer
 from .db import conectar
 from .enriquecer import pasada_pdf
 from .indexador import _procesar_pdf, en_paralelo, generar_portadas, sincronizar
@@ -33,6 +34,34 @@ ESTABLE_SEG = 120          # sin cambios durante este tiempo = terminó de copia
 DUPLICADOS = "_Duplicados/_Inbox"
 COMPRIMIDOS_HECHOS = "_Duplicados/_Inbox comprimidos"
 ACTIVOS = ("nuevo", "pendiente", "aprobado", "error")
+
+# Novelas: el parecido de nombres no sirve ("Dead Drop" acaba en Drop Dead Studios), así que los
+# ebooks se colocan por el tema del canal de Telegram del que llegaron o por su propio nombre.
+EBOOKS = {".epub", ".mobi", ".azw", ".azw3"}
+NOVELAS_40K = "Wargames/Miniaturas/Games Workshop/Warhammer 40K/Black Library/Novels"
+REGLAS_NOVELAS = [
+    (re.compile(r"necromunda", re.I), NOVELAS_40K + "/Necromunda"),
+    (re.compile(r"horus heresy", re.I), NOVELAS_40K + "/Horus Heresy"),
+    (re.compile(r"warhammer|40\.?000|\b40k\b|black library|space marine|necromunda", re.I), NOVELAS_40K),
+]
+
+
+def canal_telegram(con, nombre: str) -> str:
+    """Título del canal de Telegram del que llegó el fichero ('' si no vino de Telegram)."""
+    f = con.execute("SELECT k.titulo FROM telegram_msgs t JOIN telegram_canales k ON k.canal = t.canal "
+                    "WHERE t.archivo = ? ORDER BY t.procesado_en DESC LIMIT 1", (nombre,)).fetchone()
+    return f[0] if f and f[0] else ""
+
+
+def destino_novela(nombre: str, canal: str) -> str | None:
+    """Carpeta de novelas para un ebook, según el canal (primero) o el nombre; None si no es una."""
+    if Path(nombre).suffix.lower() not in EBOOKS:
+        return None
+    for texto in (canal, nombre):
+        for patron, carpeta in REGLAS_NOVELAS:
+            if texto and patron.search(texto):
+                return carpeta
+    return None
 
 
 def ruta_portada_entrada(cfg, entrada_id: int) -> Path:
@@ -270,7 +299,11 @@ def analizar(con, cfg) -> int:
         origen_texto = texto_telegram(con, f["nombre"])
         consulta = " ".join([f["nombre"], r.get("pdf_titulo") or "", origen_texto[:300],
                              *[p.stem for p in i["pdfs"][:10] if p.name != f["nombre"]]])
-        p = proponer(con, consulta, datos.get("editorial"))
+        novela = None if f["es_carpeta"] else destino_novela(f["nombre"], canal_telegram(con, f["nombre"]))
+        if novela:
+            p = {"propuesta": novela, "confianza": 1.0, "apoyos": VECINOS, "alternativas": [[novela, 100]]}
+        else:
+            p = proponer(con, consulta, datos.get("editorial"))
         destino = p["propuesta"]
         if destino and f["es_carpeta"]:
             # La propuesta ya es la carpeta de este producto: se fusiona en ella, no se anida.

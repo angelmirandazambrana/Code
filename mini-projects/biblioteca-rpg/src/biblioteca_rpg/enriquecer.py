@@ -1,6 +1,7 @@
 """Completa el catálogo con datos que no salen de la ruta.
 
     python -m biblioteca_rpg.enriquecer pdf                 # año, editorial e ISBN del texto de los PDF
+    python -m biblioteca_rpg.enriquecer codigos             # código de la editorial (si el nombre no lo trae)
     python -m biblioteca_rpg.enriquecer geek --minutos 120  # RPGGeek / BGG (necesita BGG_TOKEN)
     python -m biblioteca_rpg.enriquecer geek --muestra 200  # prueba con 200 documentos al azar
     python -m biblioteca_rpg.enriquecer aplicar             # recalcula los valores efectivos
@@ -17,6 +18,7 @@ import re
 import sys
 import time
 
+from . import codigos as codigos_mod
 from . import config as config_mod
 from . import geek as geek_mod
 from . import texto_pdf
@@ -104,6 +106,79 @@ def pasada_pdf(con, cfg, limite: int | None = None, solo: list[str] | None = Non
     return cuenta
 
 
+# --- Código de catálogo de la editorial -----------------------------------------
+
+def _leer_codigos(ruta_pdf: str) -> str:
+    """En un proceso aparte: solo las líneas donde podría haber un código."""
+    import pymupdf
+
+    pymupdf.TOOLS.mupdf_display_errors(False)
+    pymupdf.TOOLS.mupdf_display_warnings(False)
+    with pymupdf.open(ruta_pdf) as doc:
+        texto = texto_pdf.leer_texto(doc)
+    return "\n".join(ln for ln in texto.splitlines() if codigos_mod.RE_CODIGO.search(ln))[:20000]
+
+
+def pasada_codigos(con, cfg, limite: int | None = None, solo: list[str] | None = None) -> dict:
+    """Busca el código en el texto de los PDF cuyo nombre no lo trae. Cada PDF se lee una vez."""
+    sql = ("SELECT id, ruta, editorial_unif FROM docs WHERE portada <> -1 AND codigo IS NULL "
+           "AND lower(ruta) LIKE '%.pdf' AND NOT EXISTS "
+           "(SELECT 1 FROM extra e WHERE e.doc_id = docs.id AND e.fuente = 'codigo')")
+    params: list = []
+    if solo:
+        sql += " AND (" + " OR ".join("ruta LIKE ?" for _ in solo) + ")"
+        params += [s.strip("/").replace("\\", "/") + "/%" for s in solo]
+    sql += " ORDER BY id"
+    if limite:
+        sql += f" LIMIT {int(limite)}"
+    filas = {f["id"]: f for f in con.execute(sql, params).fetchall()}
+    if not filas:
+        return {"leidos": 0}
+    total = len(filas)
+    print(f"Códigos en el texto de los PDF: {total} pendientes (procesos: {cfg.procesos})", flush=True)
+    cuenta = {"leidos": 0, "con_codigo": 0, "dudosos": 0, "errores": 0}
+    lote: list = []
+    inicio = time.time()
+
+    def volcar():
+        with con:
+            con.executemany("INSERT OR REPLACE INTO extra (doc_id, fuente, estado, confianza, ref, datos, creado_en) "
+                            "VALUES (?, 'codigo', ?, ?, NULL, ?, ?)", lote)
+            aplicar(con, [x[0] for x in lote])
+        lote.clear()
+        hecho = cuenta["leidos"] + cuenta["errores"]
+        ritmo = hecho / max(time.time() - inicio, 1)
+        print(f"  {hecho}/{total}  con código {cuenta['con_codigo']}  dudosos {cuenta['dudosos']}  "
+              f"{ritmo:.1f}/s  quedan ~{(total - hecho) / ritmo / 60 if ritmo else 0:.0f} min", flush=True)
+
+    def guardar(doc_id, res=None, error=None):
+        ahora = int(time.time())
+        if error is not None:
+            cuenta["errores"] += 1
+            lote.append((doc_id, "sin_resultado", 0.0, geek_mod.a_json({"error": str(error)[:300]}), ahora))
+        else:
+            cuenta["leidos"] += 1
+            f = filas[doc_id]
+            codigo, candidatos = codigos_mod.del_texto(res, f["editorial_unif"], f["ruta"])
+            if codigo:
+                cuenta["con_codigo"] += 1
+                lote.append((doc_id, "auto", 0.8, geek_mod.a_json({"codigo": codigo, "candidatos": candidatos}),
+                             ahora))
+            else:
+                cuenta["dudosos"] += bool(candidatos)
+                lote.append((doc_id, "sin_resultado", 0.0, geek_mod.a_json({"candidatos": candidatos}), ahora))
+        if len(lote) >= 100:
+            volcar()
+
+    try:
+        en_paralelo(cfg, [(i, f["ruta"]) for i, f in filas.items()], _leer_codigos,
+                    lambda doc_id, rel: (str(cfg.raiz / rel),), guardar)
+    finally:
+        if lote:
+            volcar()
+    return cuenta
+
+
 # --- RPGGeek / BGG -------------------------------------------------------------
 
 def pasada_geek(con, limite: int | None = None, minutos: float | None = None, muestra: int | None = None,
@@ -157,7 +232,7 @@ def _efectivos(extras: dict) -> dict:
     pdf = extras.get("pdf") or {}
     g = (extras.get("geek") or {}).get("elegido") or {}
     v: dict = {"publicado": None, "ext_editorial": None, "autores": None, "isbn": None,
-               "geek_id": None, "geek_tipo": None}
+               "geek_id": None, "geek_tipo": None, "ext_codigo": None, "ext_codigo_orden": None}
     origen: dict = {}
     if g.get("anio"):
         v["publicado"], origen["publicado"] = g["anio"], "geek"
@@ -173,11 +248,15 @@ def _efectivos(extras: dict) -> dict:
         v["isbn"] = pdf["isbn"][0]
     if g.get("id"):
         v["geek_id"], v["geek_tipo"] = g["id"], g.get("tipo")
+    codigo = (extras.get("codigo") or {}).get("codigo")
+    if codigo:
+        v["ext_codigo"], v["ext_codigo_orden"], origen["codigo"] = codigo, codigos_mod.orden(codigo), "pdf"
     v["origen"] = json.dumps(origen) if origen else None
     return v
 
 
-COLS = ["publicado", "ext_editorial", "autores", "isbn", "geek_id", "geek_tipo", "origen"]
+COLS = ["publicado", "ext_editorial", "autores", "isbn", "geek_id", "geek_tipo", "ext_codigo", "ext_codigo_orden",
+        "origen"]
 
 
 def aplicar(con, ids: list[int] | None = None) -> int:
@@ -226,11 +305,13 @@ def resumen(con) -> None:
                       "COUNT(isbn), COUNT(geek_id), COUNT(editorial) FROM docs").fetchone()
     print(f"  documentos {tot[0]}  con año de publicación {tot[1]}  con editorial {tot[2]} "
           f"(de la ruta {tot[5]})  con ISBN {tot[3]}  enlazados a RPGGeek/BGG {tot[4]}")
+    cod = con.execute("SELECT COUNT(codigo), COUNT(ext_codigo) FROM docs").fetchone()
+    print(f"  con código de editorial {cod[0] + cod[1]} (del nombre {cod[0]}, del PDF {cod[1]})")
 
 
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description="Completa el catálogo con datos del PDF y de RPGGeek/BGG.")
-    ap.add_argument("orden", choices=["pdf", "geek", "aplicar", "resumen"])
+    ap.add_argument("orden", choices=["pdf", "codigos", "geek", "aplicar", "resumen"])
     ap.add_argument("--limite", type=int)
     ap.add_argument("--minutos", type=float, help="geek: parar tras estos minutos")
     ap.add_argument("--muestra", type=int, help="geek: documentos al azar (para probar)")
@@ -242,6 +323,8 @@ def main(argv=None) -> None:
     t = time.time()
     if args.orden == "pdf":
         print("Texto de PDF:", pasada_pdf(con, cfg, args.limite, args.solo), f"({time.time() - t:.0f} s)")
+    elif args.orden == "codigos":
+        print("Códigos:", pasada_codigos(con, cfg, args.limite, args.solo), f"({time.time() - t:.0f} s)")
     elif args.orden == "geek":
         try:
             print("RPGGeek/BGG:", pasada_geek(con, args.limite, args.minutos, args.muestra, args.solo))
