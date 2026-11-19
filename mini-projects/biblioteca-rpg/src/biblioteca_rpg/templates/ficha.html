@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_geek.html" import candidatos %}
 {% block titulo %}{{ d.titulo }} · Biblioteca{% endblock %}
 {% block contenido %}
 <nav class="migas ficha-migas" aria-label="Carpeta">
@@ -29,7 +30,14 @@
           ('Tipo', 'tipo', d.tipo), ('Idioma', 'idioma', d.idioma)] if valor %}
         <dt>{{ etiqueta }}</dt><dd><a href="{{ filtro(faceta, valor) }}">{{ valor }}</a></dd>
       {% endfor %}
-      {% if d.anio %}<dt>Año</dt><dd>{{ d.anio }}</dd>{% endif %}
+      {% if not d.editorial and d.ext_editorial %}
+        <dt>Editorial</dt><dd><a href="{{ filtro('editorial', d.ext_editorial) }}">{{ d.ext_editorial }}</a>
+          <span class="segun">según {{ origen.editorial }}</span></dd>
+      {% endif %}
+      {% if d.publicado %}<dt>Publicado</dt><dd>{{ d.publicado }} <span class="segun">según {{ origen.publicado }}</span></dd>{% endif %}
+      {% if d.anio and d.anio != d.publicado %}<dt>{{ 'Año de la edición' if d.publicado else 'Año' }}</dt><dd>{{ d.anio }}</dd>{% endif %}
+      {% if d.autores %}<dt>Autores</dt><dd>{{ d.autores }} <span class="segun">según {{ origen.autores }}</span></dd>{% endif %}
+      {% if d.isbn %}<dt>ISBN</dt><dd>{{ d.isbn }}</dd>{% endif %}
       {% if d.pdf_autor %}<dt>Autor (PDF)</dt><dd>{{ d.pdf_autor }}</dd>{% endif %}
       {% if d.paginas %}<dt>Páginas</dt><dd>{{ d.paginas }}</dd>{% endif %}
       <dt>Tamaño</dt><dd>{{ d.tamano|tamano }}</dd>
@@ -37,6 +45,22 @@
       <dt>Fichero</dt><dd class="ruta">{{ d.ruta }}</dd>
       {% if d.error %}<dt>Aviso</dt><dd class="aviso">No se pudo leer el PDF: {{ d.error }}</dd>{% endif %}
     </dl>
+
+    {% set g = extras.get('geek') %}
+    {% if g and g.estado in ('auto', 'aceptado') and g.datos.elegido %}
+      <div class="geek">
+        <p>En {{ nombre_geek }}: <a href="{{ g.datos.elegido.url }}" target="_blank" rel="noopener noreferrer">{{ g.datos.elegido.nombre }}{% if g.datos.elegido.anio %} ({{ g.datos.elegido.anio }}){% endif %} ↗</a>
+          <span class="segun">{{ 'confirmado a mano' if g.estado == 'aceptado' else 'emparejado automáticamente' }}</span></p>
+        <form method="post" action="/revisar/{{ d.id }}?accion=rechazar&volver={{ volver|qp }}">
+          <button class="boton mini" type="submit">No es este libro</button>
+        </form>
+      </div>
+    {% elif g and g.estado == 'pendiente' %}
+      <div class="geek">
+        <p>¿Es alguno de estos en {{ nombre_geek }}?</p>
+        {{ candidatos(d.id, g.datos, volver) }}
+      </div>
+    {% endif %}
 
     <p class="externos">Buscar fuera:
       <a href="{{ enlace_tienda }}" target="_blank" rel="noopener noreferrer">{{ nombre_tienda }} ↗</a>

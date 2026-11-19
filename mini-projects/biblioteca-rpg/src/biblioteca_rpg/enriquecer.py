@@ -1,0 +1,253 @@
+"""Completa el catálogo con datos que no salen de la ruta.
+
+    python -m biblioteca_rpg.enriquecer pdf                 # año, editorial e ISBN del texto de los PDF
+    python -m biblioteca_rpg.enriquecer geek --minutos 120  # RPGGeek / BGG (necesita BGG_TOKEN)
+    python -m biblioteca_rpg.enriquecer geek --muestra 200  # prueba con 200 documentos al azar
+    python -m biblioteca_rpg.enriquecer aplicar             # recalcula los valores efectivos
+    python -m biblioteca_rpg.enriquecer resumen             # cuántos hay de cada cosa
+
+Nunca toca la biblioteca ni los datos sacados de la ruta: escribe en la tabla `extra` y en las
+columnas publicado, ext_editorial, autores, isbn y geek_id del catálogo.
+"""
+
+import argparse
+import json
+import random
+import re
+import sys
+import time
+
+from . import config as config_mod
+from . import geek as geek_mod
+from . import texto_pdf
+from .db import conectar
+from .indexador import en_paralelo
+
+RE_LINEA_UTIL = re.compile(r"©|\(c\)|copyright|isbn", re.I)
+
+# Tipos de documento que no tienen sentido en RPGGeek/BGG.
+TIPOS_SIN_GEEK = ("Hojas de personaje", "Tokens", "Fan y homebrew", "Pintura y modelismo", "Listas de ejército")
+
+
+# --- Texto de los PDF ---------------------------------------------------------
+
+def _leer_pdf(ruta_pdf: str) -> dict:
+    """En un proceso aparte: solo devuelve las líneas con copyright o ISBN (poco que pasar)."""
+    import pymupdf
+
+    pymupdf.TOOLS.mupdf_display_errors(False)
+    pymupdf.TOOLS.mupdf_display_warnings(False)
+    with pymupdf.open(ruta_pdf) as doc:
+        texto = texto_pdf.leer_texto(doc)
+    lineas = [ln for ln in texto.splitlines() if RE_LINEA_UTIL.search(ln)]
+    return {"caracteres": len(texto.strip()), "lineas": "\n".join(lineas)[:20000]}
+
+
+def pasada_pdf(con, cfg, limite: int | None = None, solo: list[str] | None = None) -> dict:
+    sql = ("SELECT id, ruta, nombre FROM docs WHERE portada <> -1 AND NOT EXISTS "
+           "(SELECT 1 FROM extra e WHERE e.doc_id = docs.id AND e.fuente = 'pdf')")
+    params: list = []
+    if solo:
+        sql += " AND (" + " OR ".join("ruta LIKE ?" for _ in solo) + ")"
+        params += [s.strip("/").replace("\\", "/") + "/%" for s in solo]
+    sql += " ORDER BY id"
+    if limite:
+        sql += f" LIMIT {int(limite)}"
+    filas = con.execute(sql, params).fetchall()
+    if not filas:
+        return {"leidos": 0}
+    nombres = {f["id"]: f["nombre"] for f in filas}
+    conocidas = [r[0] for r in con.execute("SELECT DISTINCT editorial FROM docs WHERE editorial IS NOT NULL")]
+    dicc = texto_pdf.diccionario_editoriales(conocidas)
+    total = len(filas)
+    print(f"Texto de PDF pendiente: {total} (procesos: {cfg.procesos})", flush=True)
+    cuenta = {"leidos": 0, "con_datos": 0, "sin_texto": 0, "errores": 0}
+    lote: list = []
+    inicio = time.time()
+
+    def volcar():
+        with con:
+            con.executemany("INSERT OR REPLACE INTO extra (doc_id, fuente, estado, confianza, ref, datos, creado_en) "
+                            "VALUES (?, 'pdf', ?, ?, NULL, ?, ?)", lote)
+            aplicar(con, [x[0] for x in lote])
+        lote.clear()
+        hecho = cuenta["leidos"] + cuenta["errores"]
+        ritmo = hecho / max(time.time() - inicio, 1)
+        print(f"  {hecho}/{total}  con datos {cuenta['con_datos']}  sin texto {cuenta['sin_texto']}  "
+              f"{ritmo:.1f}/s  quedan ~{(total - hecho) / ritmo / 60 if ritmo else 0:.0f} min", flush=True)
+
+    def guardar(doc_id, res=None, error=None):
+        ahora = int(time.time())
+        if error is not None:
+            cuenta["errores"] += 1
+            lote.append((doc_id, "sin_resultado", 0.0, geek_mod.a_json({"error": str(error)[:300]}), ahora))
+        else:
+            cuenta["leidos"] += 1
+            datos = texto_pdf.extraer(res["lineas"], nombres[doc_id], dicc)
+            if res["caracteres"] < 200:
+                cuenta["sin_texto"] += 1
+                datos["sin_texto"] = True
+            if any(k in datos for k in ("publicado", "editorial", "isbn")):
+                cuenta["con_datos"] += 1
+                lote.append((doc_id, "auto", 0.8, geek_mod.a_json(datos), ahora))
+            else:
+                lote.append((doc_id, "sin_resultado", 0.0, geek_mod.a_json(datos), ahora))
+        if len(lote) >= 100:
+            volcar()
+
+    try:
+        en_paralelo(cfg, [(f["id"], f["ruta"]) for f in filas], _leer_pdf,
+                    lambda doc_id, rel: (str(cfg.raiz / rel),), guardar)
+    finally:
+        if lote:
+            volcar()
+    return cuenta
+
+
+# --- RPGGeek / BGG -------------------------------------------------------------
+
+def pasada_geek(con, limite: int | None = None, minutos: float | None = None, muestra: int | None = None,
+                solo: list[str] | None = None, cliente=None) -> dict:
+    categorias = list(geek_mod.TIPO_POR_CATEGORIA)
+    sql = (f"SELECT * FROM docs WHERE categoria IN ({','.join('?' * len(categorias))}) "
+           f"AND (tipo IS NULL OR tipo NOT IN ({','.join('?' * len(TIPOS_SIN_GEEK))})) "
+           "AND NOT EXISTS (SELECT 1 FROM extra e WHERE e.doc_id = docs.id AND e.fuente = 'geek')")
+    params: list = [*categorias, *TIPOS_SIN_GEEK]
+    if solo:
+        sql += " AND (" + " OR ".join("ruta LIKE ?" for _ in solo) + ")"
+        params += [s.strip("/").replace("\\", "/") + "/%" for s in solo]
+    filas = [dict(f) for f in con.execute(sql + " ORDER BY id", params)]
+    if muestra:
+        random.seed(42)
+        filas = random.sample(filas, min(muestra, len(filas)))
+    if limite:
+        filas = filas[:limite]
+    cliente = cliente or geek_mod.Cliente(con)
+    fin = time.time() + minutos * 60 if minutos else None
+    cuenta = {"auto": 0, "pendiente": 0, "sin_resultado": 0, "errores": 0}
+    print(f"RPGGeek/BGG: {len(filas)} documentos por buscar", flush=True)
+    for i, doc in enumerate(filas, 1):
+        if fin and time.time() > fin:
+            print("  tiempo agotado; se sigue en la próxima pasada")
+            break
+        try:
+            r = geek_mod.emparejar(cliente, doc)
+        except geek_mod.SinToken:
+            raise
+        except Exception as ex:
+            cuenta["errores"] += 1
+            print(f"  error con {doc['ruta']}: {type(ex).__name__}: {ex}", file=sys.stderr)
+            continue
+        cuenta[r["estado"]] += 1
+        with con:
+            con.execute("INSERT OR REPLACE INTO extra (doc_id, fuente, estado, confianza, ref, datos, creado_en) "
+                        "VALUES (?, 'geek', ?, ?, ?, ?, ?)",
+                        (doc["id"], r["estado"], r["confianza"], r["ref"], geek_mod.a_json(r["datos"]),
+                         int(time.time())))
+            aplicar(con, [doc["id"]])
+        if i % 25 == 0:
+            print(f"  {i}/{len(filas)}  {cuenta}  peticiones {cliente.peticiones}", flush=True)
+    return cuenta
+
+
+# --- Valores efectivos ----------------------------------------------------------
+
+def _efectivos(extras: dict) -> dict:
+    """extras: {fuente: datos} ya aceptados -> columnas del catálogo."""
+    pdf = extras.get("pdf") or {}
+    g = (extras.get("geek") or {}).get("elegido") or {}
+    v: dict = {"publicado": None, "ext_editorial": None, "autores": None, "isbn": None,
+               "geek_id": None, "geek_tipo": None}
+    origen: dict = {}
+    if g.get("anio"):
+        v["publicado"], origen["publicado"] = g["anio"], "geek"
+    elif pdf.get("publicado"):
+        v["publicado"], origen["publicado"] = pdf["publicado"], "pdf"
+    if g.get("editoriales"):
+        v["ext_editorial"], origen["editorial"] = g["editoriales"][0], "geek"
+    elif pdf.get("editorial"):
+        v["ext_editorial"], origen["editorial"] = pdf["editorial"], "pdf"
+    if g.get("autores"):
+        v["autores"], origen["autores"] = ", ".join(g["autores"][:6]), "geek"
+    if pdf.get("isbn"):
+        v["isbn"] = pdf["isbn"][0]
+    if g.get("id"):
+        v["geek_id"], v["geek_tipo"] = g["id"], g.get("tipo")
+    v["origen"] = json.dumps(origen) if origen else None
+    return v
+
+
+COLS = ["publicado", "ext_editorial", "autores", "isbn", "geek_id", "geek_tipo", "origen"]
+
+
+def aplicar(con, ids: list[int] | None = None) -> int:
+    """Escribe en docs los valores que salen de los extras aceptados. Devuelve cuántos cambiaron."""
+    filtro, params = "", []
+    if ids is not None:
+        if not ids:
+            return 0
+        filtro = f" AND doc_id IN ({','.join('?' * len(ids))})"
+        params = list(ids)
+    por_doc: dict[int, dict] = {}
+    for f in con.execute(f"SELECT doc_id, fuente, datos FROM extra WHERE estado IN ('auto', 'aceptado'){filtro}",
+                         params):
+        por_doc.setdefault(f[0], {})[f[1]] = json.loads(f[2])
+    if ids is None:
+        actuales_sql = "SELECT id, " + ", ".join(COLS) + " FROM docs WHERE origen IS NOT NULL OR isbn IS NOT NULL"
+        candidatos = {r[0] for r in con.execute(actuales_sql)} | set(por_doc)
+    else:
+        candidatos = set(ids)
+    cambios = []
+    ahora = int(time.time())
+    lista = list(candidatos)
+    for i in range(0, len(lista), 500):
+        trozo = lista[i:i + 500]
+        filas = con.execute(f"SELECT id, {', '.join(COLS)} FROM docs WHERE id IN ({','.join('?' * len(trozo))})",
+                            trozo)
+        for f in filas:
+            nuevo = _efectivos(por_doc.get(f[0], {}))
+            if any(nuevo[c] != f[c] for c in COLS):
+                cambios.append([*(nuevo[c] for c in COLS), ahora, f[0]])
+    if cambios:
+        con.executemany(f"UPDATE docs SET {', '.join(c + '=?' for c in COLS)}, actualizado_en=? WHERE id=?",
+                        cambios)
+    return len(cambios)
+
+
+def resumen(con) -> None:
+    for f in con.execute("SELECT fuente, estado, COUNT(*) FROM extra GROUP BY 1, 2 ORDER BY 1, 2"):
+        print(f"  {f[0]:5} {f[1]:14} {f[2]:>7}")
+    tot = con.execute("SELECT COUNT(*), COUNT(publicado), COUNT(COALESCE(editorial, ext_editorial)), "
+                      "COUNT(isbn), COUNT(geek_id), COUNT(editorial) FROM docs").fetchone()
+    print(f"  documentos {tot[0]}  con año de publicación {tot[1]}  con editorial {tot[2]} "
+          f"(de la ruta {tot[5]})  con ISBN {tot[3]}  enlazados a RPGGeek/BGG {tot[4]}")
+
+
+def main(argv=None) -> None:
+    ap = argparse.ArgumentParser(description="Completa el catálogo con datos del PDF y de RPGGeek/BGG.")
+    ap.add_argument("orden", choices=["pdf", "geek", "aplicar", "resumen"])
+    ap.add_argument("--limite", type=int)
+    ap.add_argument("--minutos", type=float, help="geek: parar tras estos minutos")
+    ap.add_argument("--muestra", type=int, help="geek: documentos al azar (para probar)")
+    ap.add_argument("--solo", action="append", help="limitar a una carpeta (relativa a la raíz)")
+    args = ap.parse_args(argv)
+
+    cfg = config_mod.cargar()
+    con = conectar(cfg.db)
+    t = time.time()
+    if args.orden == "pdf":
+        print("Texto de PDF:", pasada_pdf(con, cfg, args.limite, args.solo), f"({time.time() - t:.0f} s)")
+    elif args.orden == "geek":
+        try:
+            print("RPGGeek/BGG:", pasada_geek(con, args.limite, args.minutos, args.muestra, args.solo))
+        except geek_mod.SinToken as ex:
+            print(f"RPGGeek/BGG: no se consulta. {ex}")
+    elif args.orden == "aplicar":
+        with con:
+            print("Cambiados:", aplicar(con))
+    resumen(con)
+    con.close()
+
+
+if __name__ == "__main__":
+    main()

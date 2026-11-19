@@ -38,7 +38,10 @@ def consulta_fts(texto: str) -> str | None:
 
 def _expr(faceta: str) -> str:
     if faceta == "decada":
-        return "CASE WHEN anio IS NULL THEN NULL ELSE (anio / 10) * 10 END"
+        # Año de publicación si se conoce (PDF o RPGGeek); si no, el de la edición de la ruta.
+        return "CASE WHEN COALESCE(publicado, anio) IS NULL THEN NULL ELSE (COALESCE(publicado, anio) / 10) * 10 END"
+    if faceta == "editorial":
+        return "COALESCE(editorial, ext_editorial)"
     return faceta
 
 
@@ -88,7 +91,7 @@ def buscar(con: sqlite3.Connection, filtros: dict, q: str | None, carpeta: str |
     else:
         sql_orden = {
             "recientes": "ORDER BY llegado_en DESC, id DESC",
-            "anio": "ORDER BY anio IS NULL, anio, titulo COLLATE NOCASE",
+            "anio": "ORDER BY COALESCE(publicado, anio) IS NULL, COALESCE(publicado, anio), titulo COLLATE NOCASE",
             "paginas": "ORDER BY paginas IS NULL, paginas DESC",
         }.get(orden, "ORDER BY titulo COLLATE NOCASE")
         params_orden = []

@@ -90,6 +90,8 @@ def sincronizar(con, cfg, carpetas: list[str]) -> dict:
             f"WHERE id=?",
             cambiados,
         )
+        # Y a releer su texto.
+        con.executemany("DELETE FROM extra WHERE doc_id=? AND fuente='pdf'", [(c[-1],) for c in cambiados])
         # Mismo fichero: se recalculan los datos de la ruta por si mejoró el analizador.
         con.executemany(f"UPDATE docs SET {asignar} WHERE id=?", iguales)
 
@@ -148,6 +150,58 @@ def _matar_pool(pool):
     pool.shutdown(wait=False, cancel_futures=True)
 
 
+def en_paralelo(cfg, pendientes: list, funcion, args_de, al_acabar) -> None:
+    """Ejecuta funcion(*args_de(doc_id, rel)) para cada (doc_id, rel) en procesos aparte.
+
+    al_acabar(doc_id, res=..., error=...) se llama en el proceso principal con cada resultado.
+    Un PDF que cuelga o tumba un proceso se marca con error y el resto sigue.
+    """
+    rutas = dict(pendientes)
+    cola = list(pendientes)
+    pool = _nuevo_pool(cfg.procesos)
+    try:
+        en_vuelo: dict = {}
+        while cola or en_vuelo:
+            while cola and len(en_vuelo) < cfg.procesos * 3:
+                doc_id, rel = cola.pop(0)
+                f = pool.submit(funcion, *args_de(doc_id, rel))
+                en_vuelo[f] = (doc_id, time.time())
+            listos, _ = cf.wait(list(en_vuelo), timeout=5, return_when=cf.FIRST_COMPLETED)
+            roto = False
+            for f in listos:
+                doc_id, _t = en_vuelo.pop(f)
+                try:
+                    al_acabar(doc_id, res=f.result())
+                except cf.process.BrokenProcessPool:
+                    roto = True
+                    cola.insert(0, (doc_id, rutas[doc_id]))
+                except Exception as ex:
+                    al_acabar(doc_id, error=f"{type(ex).__name__}: {ex}")
+            colgados = [f for f, (_, t) in en_vuelo.items() if time.time() - t > TIEMPO_MAX_PDF]
+            if roto or colgados:
+                # Un PDF ha colgado o tumbado un proceso: se marca y se rehace el pool.
+                for f in colgados:
+                    doc_id, _ = en_vuelo.pop(f)
+                    al_acabar(doc_id, error="tiempo agotado")
+                for f, (doc_id, _) in en_vuelo.items():
+                    cola.insert(0, (doc_id, rutas[doc_id]))
+                en_vuelo.clear()
+                _matar_pool(pool)
+                pool = _nuevo_pool(cfg.procesos)
+                if roto:
+                    # El culpable es uno de los reencolados: se prueban de uno en uno.
+                    doc_id, rel = cola.pop(0)
+                    try:
+                        with _nuevo_pool(1) as p1:
+                            res = p1.submit(funcion, *args_de(doc_id, rel)).result(timeout=TIEMPO_MAX_PDF)
+                    except Exception as ex:
+                        al_acabar(doc_id, error=f"proceso caído: {type(ex).__name__}")
+                    else:
+                        al_acabar(doc_id, res=res)
+    finally:
+        _matar_pool(pool)
+
+
 def generar_portadas(con, cfg, limite: int | None, solo: list[str] | None) -> dict:
     sql = "SELECT id, ruta FROM docs WHERE portada=0"
     params: list = []
@@ -191,52 +245,13 @@ def generar_portadas(con, cfg, limite: int | None, solo: list[str] | None) -> di
         resta = (total - hecho) / ritmo if ritmo else 0
         print(f"  {hecho}/{total}  errores {errores}  {ritmo:.1f}/s  quedan ~{resta / 60:.0f} min", flush=True)
 
-    cola = list(pendientes)
-    pool = _nuevo_pool(cfg.procesos)
     try:
-        en_vuelo: dict = {}
-        while cola or en_vuelo:
-            while cola and len(en_vuelo) < cfg.procesos * 3:
-                doc_id, rel = cola.pop(0)
-                f = pool.submit(_procesar_pdf, str(cfg.raiz / rel),
-                                str(ruta_portada(cfg.portadas, doc_id)))
-                en_vuelo[f] = (doc_id, time.time())
-            listos, _ = cf.wait(list(en_vuelo), timeout=5, return_when=cf.FIRST_COMPLETED)
-            roto = False
-            for f in listos:
-                doc_id, _t = en_vuelo.pop(f)
-                try:
-                    guardar(doc_id, res=f.result())
-                except cf.process.BrokenProcessPool:
-                    roto = True
-                    cola.insert(0, (doc_id, dict(pendientes)[doc_id]))
-                except Exception as ex:
-                    guardar(doc_id, error=f"{type(ex).__name__}: {ex}")
-            colgados = [f for f, (_, t) in en_vuelo.items() if time.time() - t > TIEMPO_MAX_PDF]
-            if roto or colgados:
-                # Un PDF ha colgado o tumbado un proceso: se marca y se rehace el pool.
-                for f in colgados:
-                    doc_id, _ = en_vuelo.pop(f)
-                    guardar(doc_id, error="tiempo agotado")
-                for f, (doc_id, _) in en_vuelo.items():
-                    cola.insert(0, (doc_id, dict(pendientes)[doc_id]))
-                en_vuelo.clear()
-                _matar_pool(pool)
-                pool = _nuevo_pool(cfg.procesos)
-                if roto:
-                    # El culpable es uno de los reencolados: se prueban de uno en uno.
-                    doc_id, rel = cola.pop(0)
-                    try:
-                        with _nuevo_pool(1) as p1:
-                            guardar(doc_id, res=p1.submit(
-                                _procesar_pdf, str(cfg.raiz / rel),
-                                str(ruta_portada(cfg.portadas, doc_id))).result(timeout=TIEMPO_MAX_PDF))
-                    except Exception as ex:
-                        guardar(doc_id, error=f"proceso caído: {type(ex).__name__}")
+        en_paralelo(cfg, pendientes, _procesar_pdf,
+                    lambda doc_id, rel: (str(cfg.raiz / rel), str(ruta_portada(cfg.portadas, doc_id))),
+                    guardar)
     finally:
         if lote:
             volcar()
-        _matar_pool(pool)
     return {"hechas": hechas, "errores": errores}
 
 

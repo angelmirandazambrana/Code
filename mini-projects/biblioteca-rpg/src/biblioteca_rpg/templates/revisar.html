@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% from "_geek.html" import candidatos %}
+{% block titulo %}Revisar · Biblioteca{% endblock %}
+{% block contenido %}
+<section class="revisar">
+  <h1>Revisar emparejados con RPGGeek / BGG</h1>
+  <p class="tenue">
+    {% if total %}{{ total }} documentos con un candidato dudoso. Confirma el correcto o descártalos:
+    lo confirmado aparece en la ficha y en los filtros.{% else %}No hay nada pendiente de revisar.{% endif %}
+  </p>
+  {% for it in items %}
+    <article class="revisar-item">
+      <a class="revisar-portada" href="/libro/{{ it.id }}"><img src="/portada/{{ it.id }}.jpg" alt="" loading="lazy"></a>
+      <div>
+        <h2><a href="/libro/{{ it.id }}">{{ it.titulo }}</a></h2>
+        <p class="tenue ruta">{{ it.carpeta }}</p>
+        <p class="tenue">{{ [it.sistema, it.editorial or it.ext_editorial, it.publicado or it.anio]|select|join(' · ') }}</p>
+        {{ candidatos(it.id, it.datos, volver) }}
+      </div>
+    </article>
+  {% endfor %}
+  {% if paginas > 1 %}
+    <nav class="paginacion" aria-label="Páginas">
+      {% if pagina > 1 %}<a href="/revisar?pagina={{ pagina - 1 }}">‹ Anterior</a>{% endif %}
+      <span>Página {{ pagina }} de {{ paginas }}</span>
+      {% if pagina < paginas %}<a href="/revisar?pagina={{ pagina + 1 }}">Siguiente ›</a>{% endif %}
+    </nav>
+  {% endif %}
+  <p class="tenue fuente-datos">Datos de <a href="https://boardgamegeek.com" target="_blank" rel="noopener">BoardGameGeek / RPGGeek</a>.</p>
+</section>
+{% endblock %}

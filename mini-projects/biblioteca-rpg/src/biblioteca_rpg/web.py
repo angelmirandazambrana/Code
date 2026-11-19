@@ -3,18 +3,20 @@
     uvicorn biblioteca_rpg.web:app --host 0.0.0.0 --port 8090
 """
 
+import json
 import time
 from pathlib import Path
 from urllib.parse import quote_plus, urlencode
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from . import config as config_mod
 from .consultas import FACETAS, ORDENES, SIN_VALOR, buscar, facetas, subcarpetas
 from .db import conectar
+from .enriquecer import aplicar
 from .indexador import ruta_portada
 
 AQUI = Path(__file__).parent
@@ -53,6 +55,9 @@ plantillas.env.filters["fecha"] = _fecha
 plantillas.env.filters["qp"] = quote_plus
 # Cambia en cada arranque: el navegador recarga CSS/JS tras una actualización.
 plantillas.env.globals["version"] = str(int(time.time()))
+plantillas.env.globals["pendientes_revisar"] = lambda: _con().execute(
+    "SELECT COUNT(*) FROM extra WHERE fuente='geek' AND estado='pendiente'").fetchone()[0]
+NOMBRE_FUENTE = {"pdf": "el PDF", "rpgitem": "RPGGeek", "boardgame": "BoardGameGeek"}
 
 
 _cache: dict = {}
@@ -150,6 +155,11 @@ def ficha(request: Request, doc_id: int):
     ruta_red = ""
     if cfg.ruta_smb:
         ruta_red = cfg.ruta_smb.rstrip("\\") + "\\" + d["ruta"].replace("/", "\\")
+    extras = {f["fuente"]: {**dict(f), "datos": json.loads(f["datos"])}
+              for f in con.execute("SELECT * FROM extra WHERE doc_id=?", (doc_id,))}
+    geek_nombre = NOMBRE_FUENTE.get(d["geek_tipo"] or "", "RPGGeek")
+    origen = {k: (geek_nombre if v == "geek" else NOMBRE_FUENTE.get(v, v))
+              for k, v in json.loads(d["origen"] or "{}").items()}
     busqueda = d["titulo"]
     es_wargame = d["categoria"] in ("Wargames", "Juegos de mesa")
     tienda = "https://www.wargamevault.com" if es_wargame else "https://www.drivethrurpg.com"
@@ -164,7 +174,54 @@ def ficha(request: Request, doc_id: int):
         "nombre_tienda": "Wargame Vault" if es_wargame else "DriveThruRPG",
         "enlace_geek": geek, "nombre_geek": "BoardGameGeek" if es_wargame else "RPGGeek",
         "filtro": lambda faceta, valor: _url({}, alternar=(faceta, str(valor))),
+        "extras": extras, "origen": origen, "volver": f"/libro/{doc_id}",
     })
+
+
+@app.get("/revisar", response_class=HTMLResponse)
+def revisar(request: Request, pagina: int = 1):
+    """Emparejados dudosos con RPGGeek/BGG: se confirma o descarta cada uno."""
+    con = _con()
+    total = con.execute("SELECT COUNT(*) FROM extra WHERE fuente='geek' AND estado='pendiente'").fetchone()[0]
+    por_pagina = 30
+    filas = con.execute(
+        "SELECT d.id, d.titulo, d.carpeta, d.sistema, d.editorial, d.ext_editorial, d.publicado, d.anio, "
+        "e.confianza, e.datos FROM extra e JOIN docs d ON d.id = e.doc_id "
+        "WHERE e.fuente='geek' AND e.estado='pendiente' ORDER BY e.confianza DESC, d.id "
+        f"LIMIT {por_pagina} OFFSET {(max(pagina, 1) - 1) * por_pagina}"
+    ).fetchall()
+    items = [{**dict(f), "datos": json.loads(f["datos"])} for f in filas]
+    return plantillas.TemplateResponse(request, "revisar.html", {
+        "items": items, "total": total, "pagina": pagina, "paginas": max(1, -(-total // por_pagina)),
+        "volver": f"/revisar?pagina={pagina}",
+    })
+
+
+@app.post("/revisar/{doc_id}")
+def decidir(doc_id: int, accion: str, ref: int | None = None, volver: str = "/revisar"):
+    """accion=aceptar (con ref = id del candidato elegido) o rechazar."""
+    con = _con()
+    fila = con.execute("SELECT datos FROM extra WHERE doc_id=? AND fuente='geek'", (doc_id,)).fetchone()
+    if not fila or accion not in ("aceptar", "rechazar"):
+        raise HTTPException(400, "Nada que decidir")
+    datos = json.loads(fila["datos"])
+    if accion == "aceptar":
+        elegido = datos.get("elegido") or {}
+        if ref and ref != elegido.get("id"):
+            cand = next((c for c in datos.get("candidatos", []) if c.get("id") == ref), None)
+            if not cand:
+                raise HTTPException(400, "Ese candidato no está en la lista")
+            elegido = {**cand, "tipo": datos.get("tipo"), "autores": []}
+        datos["elegido"] = elegido
+        estado, ref_txt = "aceptado", str(elegido.get("id"))
+    else:
+        estado, ref_txt = "rechazado", None
+    with con:
+        con.execute("UPDATE extra SET estado=?, ref=?, datos=? WHERE doc_id=? AND fuente='geek'",
+                    (estado, ref_txt, json.dumps(datos, ensure_ascii=False), doc_id))
+        aplicar(con, [doc_id])
+    destino = volver if volver.startswith("/") and not volver.startswith("//") else "/revisar"
+    return RedirectResponse(destino, status_code=303)
 
 
 @app.get("/portada/{doc_id}.jpg")

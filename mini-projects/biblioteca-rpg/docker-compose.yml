@@ -32,6 +32,8 @@ services:
     environment:
       BIBLIOTECA_PROCESOS: "${PROCESOS:-2}"
       INTERVALO_HORAS: "${INTERVALO_HORAS:-6}"
+      BGG_TOKEN: "${BGG_TOKEN:-}"          # RPGGeek/BGG; vacío = no se consulta
+      GEEK_MINUTOS: "${GEEK_MINUTOS:-240}"
       TZ: "${TZ:-Europe/Madrid}"
     volumes:
       - "${BIBLIOTECA_HOST}:/biblioteca:ro"

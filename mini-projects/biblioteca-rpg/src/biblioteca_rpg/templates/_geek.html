@@ -1,0 +1,21 @@
+{# Candidatos de RPGGeek/BGG con botones para confirmar o descartar. #}
+{% macro candidatos(doc_id, datos, volver) %}
+  <ul class="candidatos">
+    {% for c in datos.candidatos or [] %}
+      <li>
+        <div class="cand-texto">
+          <a href="{{ c.url }}" target="_blank" rel="noopener noreferrer">{{ c.nombre }}</a>
+          {% if c.anio %}<span class="tenue">({{ c.anio }})</span>{% endif %}
+          {% if c.editoriales %}<span class="tenue"> · {{ c.editoriales[:2]|join(', ') }}</span>{% endif %}
+          <span class="confianza" title="Parecido con el título del fichero">{{ ((c.puntos or 0) * 100)|round|int }}%</span>
+        </div>
+        <form method="post" action="/revisar/{{ doc_id }}?accion=aceptar&ref={{ c.id }}&volver={{ volver|qp }}">
+          <button class="boton mini" type="submit">Es este</button>
+        </form>
+      </li>
+    {% endfor %}
+  </ul>
+  <form method="post" action="/revisar/{{ doc_id }}?accion=rechazar&volver={{ volver|qp }}">
+    <button class="boton mini" type="submit">Ninguno es</button>
+  </form>
+{% endmacro %}
