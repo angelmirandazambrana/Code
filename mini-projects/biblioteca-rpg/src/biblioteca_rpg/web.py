@@ -19,6 +19,7 @@ from .db import conectar
 from .enriquecer import aplicar
 from .entrada import DUPLICADOS, destino_valido, ruta_portada_entrada
 from .indexador import ruta_portada
+from .texto_pdf import normalizar
 
 AQUI = Path(__file__).parent
 cfg = config_mod.cargar()
@@ -308,16 +309,40 @@ def pdf_entrada(entrada_id: int):
     return FileResponse(ruta, media_type="application/pdf", filename=ruta.name, content_disposition_type="inline")
 
 
+def _indice_carpetas(con) -> list[tuple[str, str, str, int]]:
+    """[(carpeta, carpeta normalizada, último tramo normalizado, nº de documentos debajo)].
+
+    Incluye las carpetas intermedias ("RPG/Shadowrun") aunque no tengan PDF sueltos.
+    """
+    def calcular():
+        totales: dict[str, int] = {}
+        for f in con.execute("SELECT carpeta, COUNT(*) AS n FROM docs GROUP BY carpeta"):
+            partes = (f["carpeta"] or "").split("/")
+            for i in range(1, len(partes) + 1):
+                c = "/".join(partes[:i])
+                totales[c] = totales.get(c, 0) + f["n"]
+        return [(c, normalizar(c), normalizar(c.rsplit("/", 1)[-1]), n)
+                for c, n in totales.items() if c and "/_" not in "/" + c]
+    return _cacheado(con, ("carpetas",), calcular)
+
+
 @app.get("/api/carpetas")
 def api_carpetas(q: str = ""):
-    """Carpetas de la biblioteca que contienen el texto (para elegir destino)."""
-    q = q.strip()
-    if len(q) < 2:
+    """Carpetas que contienen TODAS las palabras escritas, en cualquier parte de la ruta.
+
+    "shadow 5e" encuentra "RPG/Shadowrun/5e (Catalyst, 2013)". Sin distinguir mayúsculas ni acentos.
+    Primero las que tienen las palabras en su propio nombre, luego las más grandes.
+    """
+    palabras = normalizar(q).split()
+    if not palabras or len(q.strip()) < 2:
         return JSONResponse([])
-    filas = _con().execute(
-        r"SELECT carpeta, COUNT(*) AS n FROM docs WHERE carpeta LIKE ? AND carpeta NOT LIKE '%/\_%' ESCAPE '\' "
-        "GROUP BY carpeta ORDER BY n DESC LIMIT 25", (f"%{q}%",)).fetchall()
-    return JSONResponse([f["carpeta"] for f in filas])
+    res = []
+    for carpeta, norm, ultimo, n in _indice_carpetas(_con()):
+        if all(p in norm for p in palabras):
+            en_nombre = sum(p in ultimo for p in palabras)
+            res.append((-en_nombre, carpeta.count("/"), -n, carpeta, n))
+    res.sort()
+    return JSONResponse([{"carpeta": r[3], "n": r[4]} for r in res[:30]])
 
 
 @app.get("/novedades", response_class=HTMLResponse)

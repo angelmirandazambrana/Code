@@ -34,22 +34,79 @@ document.querySelectorAll("[data-filtrar-faceta]").forEach((input) => {
   });
 });
 
-// Destino del clasificador: sugerencias de carpetas mientras se escribe.
+// Destino del clasificador: buscar carpetas por palabras y elegir de la lista.
+const sinAcentos = (t) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+function resaltar(texto, palabras) {
+  // Marca en negrita las palabras buscadas (sin distinguir mayúsculas ni acentos).
+  const base = sinAcentos(texto);
+  const marcas = new Array(texto.length).fill(false);
+  palabras.forEach((p) => {
+    let i = base.indexOf(p);
+    while (p && i >= 0) { for (let k = i; k < i + p.length; k++) marcas[k] = true; i = base.indexOf(p, i + 1); }
+  });
+  const frag = document.createDocumentFragment();
+  let i = 0;
+  while (i < texto.length) {
+    let j = i;
+    while (j < texto.length && marcas[j] === marcas[i]) j++;
+    const trozo = texto.slice(i, j);
+    frag.append(marcas[i] ? Object.assign(document.createElement("b"), { textContent: trozo }) : trozo);
+    i = j;
+  }
+  return frag;
+}
+
 document.querySelectorAll("[data-buscar-carpeta]").forEach((input) => {
-  let temporizador;
-  const lista = document.getElementById(input.getAttribute("list"));
+  const caja = input.parentElement.querySelector(".sugerencias");
+  let temporizador, activa = -1, peticion = 0;
+  const opciones = () => [...caja.querySelectorAll("button")];
+  const cerrar = () => { caja.hidden = true; activa = -1; };
+  const marcar = (i) => {
+    const ops = opciones();
+    if (!ops.length) return;
+    activa = (i + ops.length) % ops.length;
+    ops.forEach((o, k) => o.classList.toggle("activa", k === activa));
+    ops[activa].scrollIntoView({ block: "nearest" });
+  };
+  const elegir = (carpeta) => { input.value = carpeta; cerrar(); };
+
   input.addEventListener("input", () => {
     const radio = input.closest(".opcion")?.querySelector("input[type=radio]");
     if (radio) radio.checked = true;
     clearTimeout(temporizador);
     temporizador = setTimeout(async () => {
       const q = input.value.trim();
-      if (q.length < 2 || !lista) return;
-      try {
-        const r = await fetch("/api/carpetas?q=" + encodeURIComponent(q));
-        const carpetas = await r.json();
-        lista.replaceChildren(...carpetas.map((c) => Object.assign(document.createElement("option"), { value: c })));
-      } catch (_) { /* sin sugerencias */ }
-    }, 200);
+      if (q.length < 2) return cerrar();
+      const yo = ++peticion;
+      let res = [];
+      try { res = await (await fetch("/api/carpetas?q=" + encodeURIComponent(q))).json(); } catch (_) { /* nada */ }
+      if (yo !== peticion) return;  // llegó tarde: ya se escribió otra cosa
+      const palabras = sinAcentos(q).split(/[^a-z0-9]+/).filter(Boolean);
+      caja.replaceChildren();
+      if (!res.length) {
+        caja.append(Object.assign(document.createElement("span"), { className: "sin-resultados", textContent: "Ninguna carpeta con esas palabras. Puedes escribir una ruta nueva (RPG/…)." }));
+      }
+      res.forEach(({ carpeta, n }) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.dataset.carpeta = carpeta;
+        const ruta = document.createElement("span");
+        ruta.append(resaltar(carpeta, palabras));
+        b.append(ruta, Object.assign(document.createElement("span"), { className: "n", textContent: n }));
+        b.addEventListener("mousedown", (e) => { e.preventDefault(); elegir(carpeta); });
+        caja.append(b);
+      });
+      caja.hidden = false;
+      activa = -1;
+    }, 150);
   });
+  input.addEventListener("keydown", (e) => {
+    if (caja.hidden) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); marcar(activa + 1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); marcar(activa - 1); }
+    else if (e.key === "Enter" && activa >= 0) { e.preventDefault(); elegir(opciones()[activa].dataset.carpeta); }
+    else if (e.key === "Escape") cerrar();
+  });
+  input.addEventListener("blur", () => setTimeout(cerrar, 100));
 });

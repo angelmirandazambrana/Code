@@ -114,7 +114,15 @@ def test_web_decidir_y_corregir(entorno):
     pagina = cli.get("/entrada").text
     assert "Cosa rarisima.pdf" in pagina and 'class="globo">1<' in pagina
     assert cli.get(f"/entrada/{eid}/pdf").headers["content-type"] == "application/pdf"
-    assert cli.get("/api/carpetas", params={"q": "shadow"}).json() == ["RPG/Shadowrun/5e (Catalyst, 2013)"]
+    # Búsqueda por palabras sueltas, en cualquier parte de la ruta, sin mayúsculas ni acentos.
+    def carpetas(q):
+        return [r["carpeta"] for r in cli.get("/api/carpetas", params={"q": q}).json()]
+    assert carpetas("shadow") == ["RPG/Shadowrun", "RPG/Shadowrun/5e (Catalyst, 2013)"]
+    assert carpetas("5E shadow") == ["RPG/Shadowrun/5e (Catalyst, 2013)"]
+    assert carpetas("catalyst") == ["RPG/Shadowrun/5e (Catalyst, 2013)"]
+    assert carpetas("rpg adventure") == ["RPG/Pathfinder/1e/Adventure Path"]
+    assert carpetas("zzz") == []
+    assert cli.get("/api/carpetas", params={"q": "shadow"}).json()[0]["n"] == 4
 
     # Destinos fuera de la biblioteca o con '..': rechazados.
     for malo in ["/etc", "RPG/../../etc", "Otra/Cosa", "C:/Windows"]:

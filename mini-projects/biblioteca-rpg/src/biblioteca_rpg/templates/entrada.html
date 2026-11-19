@@ -36,8 +36,10 @@
                 <span class="ruta">{{ carpeta }}</span> <span class="confianza">{{ pct }}%</span></label>
             {% endfor %}
             <label class="opcion otra"><input type="radio" name="destino" value="__otra" {% if not e.alternativas %}checked{% endif %}>
-              <input type="text" name="destino_otra" list="carpetas-{{ e.id }}" placeholder="Otra carpeta: escribe para buscar (p. ej. RPG/Shadowrun)" data-buscar-carpeta autocomplete="off">
-              <datalist id="carpetas-{{ e.id }}"></datalist>
+              <span class="buscador-carpeta">
+                <input type="text" name="destino_otra" placeholder="Otra carpeta: escribe palabras (p. ej. shadowrun 5e)" data-buscar-carpeta autocomplete="off">
+                <span class="sugerencias" role="listbox" hidden></span>
+              </span>
             </label>
           </fieldset>
           <label class="renombrar">Nombre al moverlo <input type="text" name="nombre" placeholder="{{ e.nombre }}"></label>
@@ -70,8 +72,10 @@
           <details class="corregir"><summary>Corregir</summary>
             <form method="post" action="/entrada/{{ e.id }}">
               <input type="hidden" name="destino" value="__otra">
-              <input type="text" name="destino_otra" list="carpetas-r{{ e.id }}" placeholder="Nueva carpeta" data-buscar-carpeta autocomplete="off" required>
-              <datalist id="carpetas-r{{ e.id }}"></datalist>
+              <span class="buscador-carpeta">
+                <input type="text" name="destino_otra" placeholder="Nueva carpeta: escribe palabras" data-buscar-carpeta autocomplete="off" required>
+                <span class="sugerencias" role="listbox" hidden></span>
+              </span>
               <button class="boton mini" type="submit" name="accion" value="mover">Mover allí</button>
             </form>
           </details>
