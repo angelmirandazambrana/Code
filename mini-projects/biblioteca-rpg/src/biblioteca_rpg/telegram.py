@@ -24,9 +24,10 @@ import argparse
 import asyncio
 import os
 import re
+import shutil
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -50,6 +51,7 @@ class Ajustes:
     canales: tuple = ()
     extensiones: tuple = ()
     max_mb: int = 4000
+    min_libre_gb: float = 50
     cada_min: float = 10
 
     @classmethod
@@ -62,6 +64,7 @@ class Ajustes:
                               for e in _env_lista("TELEGRAM_EXTENSIONES", "pdf,zip,rar,7z,cbz,cbr,epub")),
             max_mb=int(os.environ.get("TELEGRAM_MAX_MB") or 4000),
             cada_min=float(os.environ.get("TELEGRAM_CADA_MIN") or 10),
+            min_libre_gb=float(os.environ.get("TELEGRAM_MIN_LIBRE_GB") or 50),
         )
 
     @property
@@ -214,8 +217,13 @@ async def procesar(client, con, cfg, aj: Ajustes, canal: str, msg) -> str | None
         return None
     estado, doc_id, nota = decidir(con, cfg, aj, a)
     if estado != "descargar":
-        registrar(con, a, estado, doc_id, nota=nota)
+        # Lo que se salta por tamaño no se apunta: otro historial con un límite mayor lo traerá.
+        if not nota.startswith("más de"):
+            registrar(con, a, estado, doc_id, nota=nota)
         return estado
+    libre = shutil.disk_usage(cfg.raiz / cfg.entrada).free
+    if libre - a.tamano < aj.min_libre_gb * 1024 ** 3:
+        raise SinEspacio(f"quedan {libre / 1024 ** 3:.0f} GB libres (mínimo {aj.min_libre_gb:g} GB): no se descarga más")
     try:
         archivo = await _descargar(client, msg, cfg, a)
     except Exception as ex:
@@ -306,6 +314,10 @@ class SinSesion(RuntimeError):
     pass
 
 
+class SinEspacio(RuntimeError):
+    pass
+
+
 def _proteger_sesion(cfg) -> None:
     for p in (cfg.datos / "telegram").glob("biblioteca.session*"):
         os.chmod(p, 0o600)
@@ -353,8 +365,44 @@ async def _canales(cfg, aj: Ajustes) -> None:
 async def _historial(cfg, aj: Ajustes, canal: str, desde: datetime, limite: int | None) -> None:
     con = conectar(cfg.db)
     async with _Sesion(cfg, aj) as client:
-        r = await revisar_canal(client, con, cfg, aj, canal, desde=desde, limite=limite)
+        try:
+            r = await revisar_canal(client, con, cfg, aj, canal, desde=desde, limite=limite)
+        except SinEspacio as ex:
+            sys.exit(f"Historial parado: {ex}")
         print("Historial:", r or "nada nuevo")
+
+
+async def _ensayo(cfg, aj: Ajustes, canal: str, desde: datetime, limite: int | None) -> None:
+    """Historial sin descargar nada: por mes, cuántos ficheros hay y cuántos nos faltan.
+
+    Sirve para ver hasta dónde llegó una descarga anterior: donde empiezan a faltar muchos.
+    """
+    con = conectar(cfg.db)
+    meses: dict[str, list] = {}  # 'AAAA-MM' -> [ficheros, tenidos, faltan, MB que faltan, primer msg, último msg]
+    async with _Sesion(cfg, aj) as client:
+        entidad = await client.get_entity(_referencia(canal))
+        nombre_canal = _peer_id(entidad)
+        async for msg in client.iter_messages(entidad, reverse=True, offset_date=desde, limit=limite):
+            a = adjunto_de(nombre_canal, msg)
+            if a is None:
+                continue
+            estado, _, _ = decidir(con, cfg, aj, a)
+            if estado == "ignorado":
+                continue
+            m = meses.setdefault(msg.date.strftime("%Y-%m"), [0, 0, 0, 0.0, msg.id, msg.id])
+            m[0] += 1
+            if estado == "descargar":
+                m[2] += 1
+                m[3] += a.tamano / 1024 / 1024
+            else:
+                m[1] += 1
+            m[5] = msg.id
+    print(f"{'mes':7}  {'ficheros':>8}  {'tenidos':>7}  {'faltan':>6}  {'GB faltan':>9}  mensajes")
+    tot = [0, 0, 0, 0.0]
+    for mes, (n, ten, fal, mb, p, u) in sorted(meses.items()):
+        print(f"{mes:7}  {n:8}  {ten:7}  {fal:6}  {mb / 1024:9.1f}  {p}-{u}")
+        tot = [tot[0] + n, tot[1] + ten, tot[2] + fal, tot[3] + mb]
+    print(f"{'total':7}  {tot[0]:8}  {tot[1]:7}  {tot[2]:6}  {tot[3] / 1024:9.1f}")
 
 
 def main(argv=None) -> None:
@@ -363,9 +411,13 @@ def main(argv=None) -> None:
     ap.add_argument("--canal")
     ap.add_argument("--desde", help="AAAA-MM-DD (historial)")
     ap.add_argument("--limite", type=int)
+    ap.add_argument("--max-mb", type=int, help="historial: saltarse los ficheros más grandes")
+    ap.add_argument("--ensayo", action="store_true", help="historial: solo contar, sin descargar")
     args = ap.parse_args(argv)
     cfg = config_mod.cargar()
     aj = Ajustes.cargar()
+    if args.max_mb:
+        aj = replace(aj, max_mb=args.max_mb)
     if not aj.configurado:
         msg = "Falta TELEGRAM_API_ID / TELEGRAM_API_HASH en el .env (se piden en https://my.telegram.org)."
         if args.orden == "vigilar":
@@ -385,7 +437,7 @@ def main(argv=None) -> None:
         if not args.canal or not args.desde:
             sys.exit("historial necesita --canal y --desde AAAA-MM-DD")
         desde = datetime.strptime(args.desde, "%Y-%m-%d").replace(tzinfo=UTC)
-        asyncio.run(_historial(cfg, aj, args.canal, desde, args.limite))
+        asyncio.run((_ensayo if args.ensayo else _historial)(cfg, aj, args.canal, desde, args.limite))
     else:
         if not aj.canales:
             print("No hay canales en TELEGRAM_CANALES. En espera.", flush=True)

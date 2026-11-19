@@ -173,3 +173,22 @@ def test_pagina_telegram(entorno):
     html = http.get("/telegram").text
     assert "Canal de pruebas" in html and "Ya lo tenías" in html and "ver el tuyo" in html
     assert 'href="/telegram"' in http.get("/").text
+
+
+def test_grandes_se_dejan_para_luego_y_freno_por_disco(entorno, monkeypatch):
+    from dataclasses import replace
+    cfg, con, aj, raiz, _ = entorno
+    cliente = Cliente([_msg(1, "Primero.pdf", b"%PDF-1.4 a", 1)])
+    asyncio.run(tg.revisar_canal(cliente, con, cfg, aj, "@canal"))
+    cliente.mensajes.append(_msg(2, "Grande.pdf", b"%PDF-1.4 " + b"x" * 2_000_000, 2))
+    pequeno = replace(aj, max_mb=1)
+    assert asyncio.run(tg.revisar_canal(cliente, con, cfg, pequeno, "@canal")) == {"ignorado": 1}
+    # No queda apuntado: un historial con más margen lo trae.
+    r = asyncio.run(tg.revisar_canal(cliente, con, cfg, aj, "@canal", desde=datetime(2026, 1, 1, tzinfo=UTC)))
+    assert r == {"descargado": 2}
+
+    cliente.mensajes.append(_msg(3, "Otro.pdf", b"%PDF-1.4 c", 3))
+    sin_sitio = replace(aj, min_libre_gb=10 ** 9)
+    with pytest.raises(tg.SinEspacio):
+        asyncio.run(tg.revisar_canal(cliente, con, cfg, sin_sitio, "@canal"))
+    assert not (raiz / "_Inbox/Otro.pdf").exists()
