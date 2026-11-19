@@ -205,6 +205,14 @@ def _pdfs(ruta: Path) -> list[Path]:
                   key=lambda p: p.as_posix().lower())
 
 
+def texto_telegram(con, nombre: str) -> str:
+    """Mensaje de Telegram del fichero (o del comprimido del que salió la carpeta)."""
+    candidatos = [nombre] + [nombre + ext for ext in COMPRIMIDOS]
+    f = con.execute(f"SELECT texto FROM telegram_msgs WHERE archivo IN ({','.join('?' * len(candidatos))}) "
+                    "AND texto <> '' ORDER BY procesado_en DESC LIMIT 1", candidatos).fetchone()
+    return f[0] if f else ""
+
+
 def buscar_duplicado(con, cfg, pdf: Path, tam: int) -> int | None:
     """id del documento de la biblioteca idéntico (mismo tamaño y mismo SHA-256)."""
     candidatos = con.execute("SELECT id, ruta FROM docs WHERE tamano=?", (tam,)).fetchall()
@@ -257,8 +265,10 @@ def analizar(con, cfg) -> int:
                 n_dup += 1
                 duplicado_de = duplicado_de or d
         todo_duplicado = bool(i["pdfs"]) and n_dup == len(i["pdfs"])
-        # Texto para buscar parecidos: nombre, título interno y nombres de los PDF de dentro.
-        consulta = " ".join([f["nombre"], r.get("pdf_titulo") or "",
+        # Texto para buscar parecidos: nombre, título interno, nombres de los PDF de dentro
+        # y el mensaje de Telegram con el que llegó (si vino de allí).
+        origen_texto = texto_telegram(con, f["nombre"])
+        consulta = " ".join([f["nombre"], r.get("pdf_titulo") or "", origen_texto[:300],
                              *[p.stem for p in i["pdfs"][:10] if p.name != f["nombre"]]])
         p = proponer(con, consulta, datos.get("editorial"))
         destino = p["propuesta"]
@@ -277,13 +287,13 @@ def analizar(con, cfg) -> int:
             con.execute(
                 "UPDATE entrada SET tamano=?, n_pdfs=?, paginas=?, pdf_titulo=?, editorial=?, publicado=?, "
                 "portada=?, duplicado_de=?, duplicados=?, propuesta=?, confianza=?, apoyos=?, alternativas=?, "
-                "estado=?, destino=?, auto=?, nota=?, decidido_en=? WHERE id=?",
+                "estado=?, destino=?, auto=?, nota=?, decidido_en=?, origen_texto=? WHERE id=?",
                 (i["tamano"], len(i["pdfs"]), r.get("paginas"), r.get("pdf_titulo"), datos.get("editorial"),
                  datos.get("publicado"), 1 if "paginas" in r else (-1 if i["principal"] else 0),
                  duplicado_de, n_dup, p["propuesta"], p["confianza"], p["apoyos"],
                  json.dumps(p["alternativas"], ensure_ascii=False), estado,
                  destino if estado == "aprobado" else None, auto, r.get("error"),
-                 int(time.time()) if estado == "aprobado" else None, f["id"]),
+                 int(time.time()) if estado == "aprobado" else None, origen_texto or None, f["id"]),
             )
         print(f"  {f['nombre']}: {estado} -> {destino or '-'} ({p['confianza']:.0%}, {p['apoyos']} apoyos)"
               f"{'  DUPLICADO' if todo_duplicado else ''}", flush=True)

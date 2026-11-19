@@ -60,3 +60,28 @@ services:
       - "${DATOS_HOST}:/datos"
     mem_limit: 768m
     cpus: "1"
+
+  # Descarga de Telegram a _Inbox. Ve la biblioteca en solo lectura (para no bajar lo que ya
+  # tienes) y SOLO puede escribir en la carpeta de entrada. Sin TELEGRAM_API_ID se queda en espera.
+  telegram:
+    image: biblioteca-rpg:latest
+    container_name: biblioteca-telegram
+    depends_on: [web]
+    restart: unless-stopped
+    user: "${PUID:-1000}:${PGID:-100}"
+    command: ["python", "-m", "biblioteca_rpg.telegram", "vigilar"]
+    environment:
+      TELEGRAM_API_ID: "${TELEGRAM_API_ID:-}"
+      TELEGRAM_API_HASH: "${TELEGRAM_API_HASH:-}"
+      TELEGRAM_CANALES: "${TELEGRAM_CANALES:-}"
+      TELEGRAM_EXTENSIONES: "${TELEGRAM_EXTENSIONES:-pdf,zip,rar,7z,cbz,cbr,epub}"
+      TELEGRAM_MAX_MB: "${TELEGRAM_MAX_MB:-4000}"
+      TELEGRAM_CADA_MIN: "${TELEGRAM_CADA_MIN:-10}"
+      BIBLIOTECA_ENTRADA: "${ENTRADA:-_Inbox}"
+      TZ: "${TZ:-Europe/Madrid}"
+    volumes:
+      - "${BIBLIOTECA_HOST}:/biblioteca:ro"
+      - "${BIBLIOTECA_HOST}/${ENTRADA:-_Inbox}:/biblioteca/${ENTRADA:-_Inbox}"   # escritura solo aquí
+      - "${DATOS_HOST}:/datos"
+    mem_limit: 384m
+    cpus: "1"

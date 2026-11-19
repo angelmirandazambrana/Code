@@ -110,3 +110,69 @@ document.querySelectorAll("[data-buscar-carpeta]").forEach((input) => {
   });
   input.addEventListener("blur", () => setTimeout(cerrar, 100));
 });
+
+// Buscador de la cabecera: escritura predictiva con editoriales, sistemas y títulos que tenemos.
+document.querySelectorAll("[data-sugerir]").forEach((input) => {
+  const caja = input.form.querySelector(".sugerencias");
+  let temporizador, activa = -1, peticion = 0;
+  const opciones = () => [...caja.querySelectorAll("a")];
+  const cerrar = () => { caja.hidden = true; activa = -1; input.setAttribute("aria-expanded", "false"); };
+  const marcar = (i) => {
+    const ops = opciones();
+    if (!ops.length) return;
+    activa = (i + ops.length) % ops.length;
+    ops.forEach((o, k) => o.classList.toggle("activa", k === activa));
+    ops[activa].scrollIntoView({ block: "nearest" });
+  };
+  const opcion = (url, texto, palabras, extra, claseExtra) => {
+    const a = Object.assign(document.createElement("a"), { href: url });
+    a.setAttribute("role", "option");
+    const t = document.createElement("span");
+    t.className = "texto";
+    t.append(resaltar(texto, palabras));
+    a.append(t);
+    if (extra) a.append(Object.assign(document.createElement("span"), { className: claseExtra, textContent: extra }));
+    return a;
+  };
+  const grupo = (texto) => Object.assign(document.createElement("div"), { className: "grupo", textContent: texto });
+
+  input.addEventListener("input", () => {
+    clearTimeout(temporizador);
+    temporizador = setTimeout(async () => {
+      const q = input.value.trim();
+      if (q.length < 2) return cerrar();
+      const yo = ++peticion;
+      let res = { valores: [], libros: [] };
+      try { res = await (await fetch("/api/sugerencias?q=" + encodeURIComponent(q))).json(); } catch (_) { /* nada */ }
+      if (yo !== peticion) return;
+      if (!res.valores.length && !res.libros.length) return cerrar();
+      const palabras = sinAcentos(q).split(/[^a-z0-9]+/).filter(Boolean);
+      caja.replaceChildren();
+      if (res.valores.length) {
+        caja.append(grupo("Filtrar por"));
+        res.valores.forEach((v) => {
+          const a = opcion(v.url, v.valor, palabras, v.n.toLocaleString("es"), "n");
+          a.prepend(Object.assign(document.createElement("span"), { className: "faceta-etq", textContent: v.etiqueta }));
+          caja.append(a);
+        });
+      }
+      if (res.libros.length) {
+        caja.append(grupo("Libros"));
+        res.libros.forEach((l) => caja.append(opcion(l.url, l.titulo, palabras, l.detalle, "detalle")));
+      }
+      caja.hidden = false;
+      input.setAttribute("aria-expanded", "true");
+      activa = -1;
+    }, 120);
+  });
+  input.addEventListener("keydown", (e) => {
+    if (caja.hidden) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); marcar(activa + 1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); marcar(activa - 1); }
+    else if (e.key === "Enter" && activa >= 0) { e.preventDefault(); location.href = opciones()[activa].href; }
+    else if (e.key === "Escape") cerrar();
+  });
+  // mousedown para que el clic llegue antes de que el blur cierre la lista
+  caja.addEventListener("mousedown", (e) => e.preventDefault());
+  input.addEventListener("blur", () => setTimeout(cerrar, 150));
+});

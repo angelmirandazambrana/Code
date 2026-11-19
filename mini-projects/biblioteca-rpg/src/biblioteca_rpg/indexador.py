@@ -106,6 +106,10 @@ def sincronizar(con, cfg, carpetas: list[str]) -> dict:
     for _, i in desaparecidos:
         ruta_portada(cfg.portadas, i).unlink(missing_ok=True)
 
+    if nuevos or cambiados or desaparecidos:
+        from .editoriales import recalcular  # aquí: editoriales importa db y texto_pdf
+        recalcular(con)
+
     return {"nuevos": len(nuevos), "cambiados": len(cambiados), "iguales": len(iguales),
             "borrados": len(desaparecidos)}
 

@@ -87,6 +87,33 @@ CREATE TABLE IF NOT EXISTS entrada (
 );
 CREATE INDEX IF NOT EXISTS ix_entrada_estado ON entrada(estado);
 
+-- Telegram: hasta dónde se ha leído cada canal y qué se hizo con cada fichero.
+CREATE TABLE IF NOT EXISTS telegram_canales (
+    canal TEXT PRIMARY KEY,             -- id de Telegram (p. ej. -1001234567890)
+    titulo TEXT,
+    ultimo_id INTEGER NOT NULL DEFAULT 0,
+    revisado_en INTEGER
+);
+-- estado: descargado, ya_en_biblioteca, ya_en_entrada, repetido, ignorado, error
+CREATE TABLE IF NOT EXISTS telegram_msgs (
+    canal TEXT NOT NULL,
+    msg_id INTEGER NOT NULL,
+    tg_doc_id INTEGER,                  -- id del documento en Telegram (igual si se reenvía)
+    nombre TEXT, tamano INTEGER,
+    texto TEXT,                         -- el mensaje que acompaña al fichero
+    fecha INTEGER,
+    estado TEXT NOT NULL,
+    doc_id INTEGER,                     -- el de la biblioteca, si ya lo teníamos
+    archivo TEXT,                       -- nombre con el que quedó en _Inbox
+    nota TEXT,
+    intentos INTEGER NOT NULL DEFAULT 0,
+    procesado_en INTEGER,
+    PRIMARY KEY (canal, msg_id)
+);
+CREATE INDEX IF NOT EXISTS ix_tg_doc ON telegram_msgs(tg_doc_id);
+CREATE INDEX IF NOT EXISTS ix_tg_archivo ON telegram_msgs(archivo);
+CREATE INDEX IF NOT EXISTS ix_tg_procesado ON telegram_msgs(procesado_en);
+
 -- Respuestas de la API de RPGGeek/BGG ya pedidas (para no repetir consultas).
 CREATE TABLE IF NOT EXISTS geek_cache (
     clave TEXT PRIMARY KEY,
@@ -105,6 +132,27 @@ COLUMNAS_EXTRA = {
     "geek_id": "INTEGER",
     "geek_tipo": "TEXT",         # rpgitem | boardgame
     "origen": "TEXT",            # JSON {campo: fuente}
+    "editorial_unif": "TEXT",    # editorial con el nombre unificado (ver editoriales.py)
+}
+
+# Editorial unificada: forma -> nombre (lo rellena editoriales.recalcular) y disparadores que
+# mantienen docs.editorial_unif al día cuando cambia la editorial de un documento.
+_EDITORIAL = "COALESCE(new.editorial, new.ext_editorial)"
+_UNIF = f"COALESCE((SELECT nombre FROM editorial_alias WHERE forma = {_EDITORIAL}), {_EDITORIAL})"
+ESQUEMA_EDITORIALES = f"""
+CREATE TABLE IF NOT EXISTS editorial_alias (forma TEXT PRIMARY KEY, nombre TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS ix_editorial_unif ON docs(editorial_unif);
+CREATE TRIGGER IF NOT EXISTS docs_editorial_ai AFTER INSERT ON docs BEGIN
+    UPDATE docs SET editorial_unif = {_UNIF} WHERE id = new.id;
+END;
+CREATE TRIGGER IF NOT EXISTS docs_editorial_au AFTER UPDATE OF editorial, ext_editorial ON docs BEGIN
+    UPDATE docs SET editorial_unif = {_UNIF} WHERE id = new.id;
+END;
+"""
+
+
+COLUMNAS_ENTRADA = {
+    "origen_texto": "TEXT",      # mensaje de Telegram que acompañaba al fichero
 }
 
 
@@ -122,13 +170,19 @@ def conectar(ruta: Path, solo_lectura: bool = False) -> sqlite3.Connection:
 
 
 def _migrar(con: sqlite3.Connection) -> None:
-    existentes = {r[1] for r in con.execute("PRAGMA table_info(docs)")}
-    for col, tipo in COLUMNAS_EXTRA.items():
-        if col not in existentes:
-            try:
-                con.execute(f"ALTER TABLE docs ADD COLUMN {col} {tipo}")
-            except sqlite3.OperationalError as ex:  # otro proceso la creó a la vez
-                if "duplicate column" not in str(ex):
-                    raise
+    nuevas = set()
+    for tabla, columnas in (("docs", COLUMNAS_EXTRA), ("entrada", COLUMNAS_ENTRADA)):
+        existentes = {r[1] for r in con.execute(f"PRAGMA table_info({tabla})")}
+        for col, tipo in columnas.items():
+            if col not in existentes:
+                nuevas.add(col)
+                try:
+                    con.execute(f"ALTER TABLE {tabla} ADD COLUMN {col} {tipo}")
+                except sqlite3.OperationalError as ex:  # otro proceso la creó a la vez
+                    if "duplicate column" not in str(ex):
+                        raise
     con.execute("CREATE INDEX IF NOT EXISTS ix_ext_editorial ON docs(ext_editorial)")
+    con.executescript(ESQUEMA_EDITORIALES)
+    if "editorial_unif" in nuevas:  # hasta que se recalculen los alias, la editorial tal cual
+        con.execute("UPDATE docs SET editorial_unif = COALESCE(editorial, ext_editorial)")
     con.commit()

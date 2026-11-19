@@ -211,6 +211,11 @@ def aplicar(con, ids: list[int] | None = None) -> int:
     if cambios:
         con.executemany(f"UPDATE docs SET {', '.join(c + '=?' for c in COLS)}, actualizado_en=? WHERE id=?",
                         cambios)
+    if cambios and ids is None:
+        # Pueden haber aparecido formas nuevas de editoriales. (Con ids sueltos, desde la web,
+        # bastan los disparadores con los alias que ya hay.)
+        from .editoriales import recalcular
+        recalcular(con)
     return len(cambios)
 
 

@@ -57,9 +57,35 @@ el principio; las portadas van apareciendo. Las siguientes pasadas solo tocan lo
 **No publicar en internet sin autenticación.** Si más adelante se expone con Nginx Proxy Manager,
 que sea en un subdominio y con acceso protegido.
 
+## Telegram
+
+El servicio `telegram` descarga a `_Inbox` los ficheros nuevos de los canales que elijas, solo si no
+los tienes ya (mismo tamaño en la biblioteca, en la entrada o el mismo documento ya descargado).
+Después el clasificador los coloca. Ve la biblioteca en solo lectura y solo escribe en `_Inbox`.
+
+1. En <https://my.telegram.org> → *API development tools*, crea una aplicación y copia `api_id` y
+   `api_hash` en el `.env` de OMV3 (`TELEGRAM_API_ID`, `TELEGRAM_API_HASH`). No los subas a git.
+2. Inicia sesión una vez (pide tu teléfono y el código que te llega por Telegram):
+   ```bash
+   cd /opt/biblioteca-rpg
+   docker compose run --rm telegram python -m biblioteca_rpg.telegram login
+   ```
+   La sesión queda en `datos/telegram/` con permisos 600: da acceso a tu cuenta, no la copies.
+3. Lista tus grupos y canales y copia los ids que quieras en `TELEGRAM_CANALES` (separados por comas):
+   ```bash
+   docker compose run --rm telegram python -m biblioteca_rpg.telegram canales
+   ```
+4. `docker compose up -d telegram`. Cada canal se empieza a leer **desde ese momento**. Para traer
+   mensajes anteriores:
+   ```bash
+   docker compose run --rm telegram python -m biblioteca_rpg.telegram historial --canal ID --desde 2026-10-01
+   ```
+
+En la web, la página *Telegram* muestra qué se descargó y qué se saltó (y por qué).
+
 ## Hoja de ruta
 
 1. ✅ Catálogo, portadas, búsqueda y filtros.
-2. Clasificador: carpeta `_Entrada` → destino propuesto, vistas *Novedades* y *Revisar*.
-3. Descargador de Telegram conectado al catálogo (no descargar lo que ya existe).
-4. Datos de RPGGeek / BoardGameGeek (temas, portadas, años) con revisión manual.
+2. ✅ Datos del texto de los PDF (año, editorial, ISBN); RPGGeek/BGG pendiente del token.
+3. ✅ Clasificador de `_Inbox`: destino propuesto, *Entrada* y *Novedades*.
+4. ✅ Descargador de Telegram conectado al catálogo (no descarga lo que ya existe).

@@ -6,6 +6,7 @@
     <button class="cerrar-lateral" type="button" data-alternar-lateral aria-label="Cerrar filtros">✕</button>
     {% for faceta, valores in facetas.items() %}
       {% set activos = filtros.get(faceta, []) %}
+      {% set excluidos = filtros.get(no ~ faceta, []) %}
       <section class="faceta" data-faceta>
         <h3>{{ etiquetas[faceta] }}</h3>
         {% if valores|length > 10 %}
@@ -13,12 +14,16 @@
         {% endif %}
         <ul>
           {% for valor, n in valores %}
-            <li class="{% if valor in activos %}activo{% endif %}{% if loop.index > 8 and valor not in activos %} extra{% endif %}" data-valor="{{ valor|lower }}">
-              <a href="{{ url(alternar=(faceta, valor)) }}">
+            {% set marcado = valor in activos or valor in excluidos %}
+            <li class="{% if valor in activos %}activo{% elif valor in excluidos %}excluido{% endif %}{% if loop.index > 8 and not marcado %} extra{% endif %}" data-valor="{{ valor|lower }}">
+              <a href="{{ url(alternar=(faceta, valor)) }}"{% if valor in excluidos %} title="Excluido: pulsa para incluirlo"{% endif %}>
                 <span class="caja" aria-hidden="true"></span>
                 <span class="valor{% if valor == sin_valor %} tenue{% endif %}">{{ valor }}{% if faceta == 'decada' and valor != sin_valor %}s{% endif %}</span>
                 <span class="n">{{ n }}</span>
               </a>
+              <a class="excluir" href="{{ url(alternar=(no ~ faceta, valor)) }}"
+                 title="{% if valor in excluidos %}Dejar de excluir{% else %}Todo menos {{ valor }}{% endif %}"
+                 aria-label="{% if valor in excluidos %}Dejar de excluir {{ valor }}{% else %}Excluir {{ valor }}{% endif %}">⊘</a>
             </li>
           {% endfor %}
         </ul>
@@ -64,7 +69,11 @@
       <div class="activos">
         {% if q %}<a class="pastilla" href="{{ url(q=None) }}">“{{ q }}” ✕</a>{% endif %}
         {% for faceta, valores in filtros.items() %}{% for v in valores %}
-          <a class="pastilla" href="{{ url(alternar=(faceta, v)) }}"><span class="tenue">{{ etiquetas[faceta] }}:</span> {{ v }} ✕</a>
+          {% if faceta.startswith(no) %}
+            <a class="pastilla negada" href="{{ url(alternar=(faceta, v)) }}"><span class="tenue">{{ etiquetas[faceta[no|length:]] }}:</span> todo menos {{ v }} ✕</a>
+          {% else %}
+            <a class="pastilla" href="{{ url(alternar=(faceta, v)) }}"><span class="tenue">{{ etiquetas[faceta] }}:</span> {{ v }} ✕</a>
+          {% endif %}
         {% endfor %}{% endfor %}
         <a class="limpiar" href="/{% if carpeta %}?carpeta={{ carpeta|qp }}{% endif %}">Quitar filtros</a>
       </div>
@@ -78,7 +87,7 @@
               <div class="portada"><img src="/portada/{{ d.id }}.jpg" alt="" loading="lazy" decoding="async"></div>
               <h2 title="{{ d.titulo }}">{{ d.titulo }}</h2>
               <p class="linea">{{ d.sistema or d.categoria or '' }}{% if d.edicion %} · {{ d.edicion }}{% endif %}</p>
-              {% set pie = [d.editorial or d.ext_editorial, d.publicado or d.anio, (d.paginas ~ ' pág.') if d.paginas else None]|select|join(' · ') %}
+              {% set pie = [d.editorial_unif, d.publicado or d.anio, (d.paginas ~ ' pág.') if d.paginas else None]|select|join(' · ') %}
               <p class="linea tenue">{{ pie }}&nbsp;</p>
             </a>
           </li>

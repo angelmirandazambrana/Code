@@ -5,3 +5,5 @@ __pycache__/
 *.pyc
 datos/
 .env
+*.session
+*.session-journal

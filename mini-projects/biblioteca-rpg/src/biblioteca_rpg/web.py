@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from . import config as config_mod
-from .consultas import FACETAS, ORDENES, SIN_VALOR, buscar, facetas, subcarpetas
+from .consultas import FACETAS, NO, ORDENES, SIN_VALOR, buscar, consulta_fts, facetas, subcarpetas
 from .db import conectar
 from .enriquecer import aplicar
 from .entrada import DUPLICADOS, destino_valido, ruta_portada_entrada
@@ -61,6 +61,8 @@ plantillas.env.globals["pendientes_revisar"] = lambda: _con().execute(
     "SELECT COUNT(*) FROM extra WHERE fuente='geek' AND estado='pendiente'").fetchone()[0]
 plantillas.env.globals["pendientes_entrada"] = lambda: _con().execute(
     "SELECT COUNT(*) FROM entrada WHERE estado IN ('pendiente', 'error')").fetchone()[0]
+plantillas.env.globals["hay_telegram"] = lambda: _con().execute(
+    "SELECT EXISTS (SELECT 1 FROM telegram_canales)").fetchone()[0]
 NOMBRE_FUENTE = {"pdf": "el PDF", "rpgitem": "RPGGeek", "boardgame": "BoardGameGeek"}
 
 
@@ -68,8 +70,11 @@ _cache: dict = {}
 
 
 def _cacheado(con, clave, calcular):
-    """Facetas y subcarpetas solo cambian cuando el indexador añade, cambia o borra ficheros."""
-    version = tuple(con.execute("SELECT COUNT(*), MAX(id), MAX(actualizado_en) FROM docs").fetchone())
+    """Facetas y subcarpetas solo cambian cuando el indexador añade, cambia o borra ficheros
+    (o cuando se recalculan los nombres unificados de las editoriales)."""
+    version = tuple(con.execute(
+        "SELECT COUNT(*), MAX(id), MAX(actualizado_en), (SELECT COUNT(*) || MAX(forma) FROM editorial_alias) "
+        "FROM docs").fetchone())
     if _cache.get("version") != version:
         _cache.clear()
         _cache["version"] = version
@@ -82,17 +87,29 @@ def _cacheado(con, clave, calcular):
 
 
 def _leer_filtros(request: Request) -> dict:
-    return {f: request.query_params.getlist(f) for f in FACETAS if request.query_params.getlist(f)}
+    """{"editorial": [...], "no_sistema": [...]}: lo incluido y lo excluido ("todo menos")."""
+    claves = [*FACETAS, *(NO + f for f in FACETAS)]
+    return {f: request.query_params.getlist(f) for f in claves if request.query_params.getlist(f)}
 
 
 def _url(base: dict, **cambios) -> str:
-    """URL de la portada con los parámetros actuales cambiados. None borra; una tupla (faceta, valor) alterna."""
+    """URL de la portada con los parámetros actuales cambiados. None borra; una tupla (faceta, valor) alterna.
+
+    La faceta puede ser "no_editorial" (excluir). Un valor no puede estar incluido y excluido a la vez:
+    al activarlo en un lado se quita del otro.
+    """
     params = {k: list(v) if isinstance(v, list) else v for k, v in base.items()}
     for k, v in cambios.items():
         if k == "alternar":
             faceta, valor = v
             actuales = params.get(faceta, [])
-            params[faceta] = [x for x in actuales if x != valor] if valor in actuales else [*actuales, valor]
+            if valor in actuales:
+                params[faceta] = [x for x in actuales if x != valor]
+            else:
+                params[faceta] = [*actuales, valor]
+                opuesta = faceta[len(NO):] if faceta.startswith(NO) else NO + faceta
+                if opuesta in params:
+                    params[opuesta] = [x for x in params[opuesta] if x != valor]
             params.pop("pagina", None)
         elif v is None:
             params.pop(k, None)
@@ -133,7 +150,7 @@ def inicio(request: Request, q: str = "", carpeta: str = "", orden: str = "", pa
         "res": res, "pagina": pagina,
         "facetas": _cacheado(con, ("f", clave_cache),
                              lambda: facetas(con, filtros, q or None, carpeta or None)),
-        "etiquetas": FACETAS, "filtros": filtros, "sin_valor": SIN_VALOR,
+        "etiquetas": FACETAS, "filtros": filtros, "sin_valor": SIN_VALOR, "no": NO,
         "subcarpetas": _cacheado(con, ("s", clave_cache),
                                  lambda: subcarpetas(con, filtros, q or None, carpeta or None)),
         "migas": migas, "url": lambda **c: _url(base, **c),
@@ -189,7 +206,7 @@ def revisar(request: Request, pagina: int = 1):
     total = con.execute("SELECT COUNT(*) FROM extra WHERE fuente='geek' AND estado='pendiente'").fetchone()[0]
     por_pagina = 30
     filas = con.execute(
-        "SELECT d.id, d.titulo, d.carpeta, d.sistema, d.editorial, d.ext_editorial, d.publicado, d.anio, "
+        "SELECT d.id, d.titulo, d.carpeta, d.sistema, d.editorial, d.ext_editorial, d.editorial_unif, d.publicado, d.anio, "
         "e.confianza, e.datos FROM extra e JOIN docs d ON d.id = e.doc_id "
         "WHERE e.fuente='geek' AND e.estado='pendiente' ORDER BY e.confianza DESC, d.id "
         f"LIMIT {por_pagina} OFFSET {(max(pagina, 1) - 1) * por_pagina}"
@@ -345,6 +362,66 @@ def api_carpetas(q: str = ""):
     return JSONResponse([{"carpeta": r[3], "n": r[4]} for r in res[:30]])
 
 
+# Facetas que se sugieren al escribir en el buscador.
+FACETAS_SUGERIDAS = ("editorial", "sistema", "ambientacion")
+
+
+def _indice_valores(con) -> list[tuple[str, str, str, int]]:
+    """[(faceta, valor, valor normalizado, nº de documentos)] de las facetas sugeridas."""
+    def calcular():
+        res = []
+        for faceta in FACETAS_SUGERIDAS:
+            expr = "editorial_unif" if faceta == "editorial" else faceta
+            for f in con.execute(f"SELECT {expr} AS v, COUNT(*) AS n FROM docs WHERE {expr} IS NOT NULL GROUP BY v"):
+                res.append((faceta, f["v"], normalizar(f["v"]), f["n"]))
+        return res
+    return _cacheado(con, ("valores",), calcular)
+
+
+@app.get("/api/sugerencias")
+def api_sugerencias(q: str = ""):
+    """Escritura predictiva del buscador: editoriales/sistemas que tenemos y títulos de libros.
+
+    Todas las palabras tienen que aparecer (la última puede estar a medias). Sin distinguir acentos.
+    """
+    con = _con()
+    palabras = normalizar(q).split()
+    if not palabras or len(q.strip()) < 2:
+        return JSONResponse({"valores": [], "libros": []})
+    valores = []
+    for faceta, valor, norm, n in _indice_valores(con):
+        if all(p in norm for p in palabras):
+            empieza = norm.startswith(palabras[0]) or f" {palabras[0]}" in f" {norm}"
+            valores.append((not empieza, -n, faceta, valor, n))
+    valores.sort()
+    libros, vistos = [], set()
+    fts = consulta_fts(q)
+    # Primero los que tienen las palabras en el título; si faltan, los que las tienen en la carpeta
+    # ("cthulhu mon" -> los Monsters de Call of Cthulhu). Sin repetir el mismo título.
+    consultas = ["{titulo pdf_titulo} : (" + fts + ")", fts] if fts else []
+    for consulta in consultas:
+        filas = con.execute(
+            "SELECT d.id, d.titulo, d.sistema, d.edicion, COALESCE(d.publicado, d.anio) AS anio "
+            "FROM docs_fts JOIN docs d ON d.id = docs_fts.rowid "
+            "WHERE docs_fts MATCH ? ORDER BY bm25(docs_fts, 10.0, 1.0, 4.0, 1.0) LIMIT 40",
+            [consulta],
+        ).fetchall()
+        for f in filas:
+            clave = normalizar(f["titulo"])
+            if clave in vistos or len(libros) == 7:
+                continue
+            vistos.add(clave)
+            detalle = " · ".join(str(x) for x in (f["sistema"], f["edicion"], f["anio"]) if x)
+            libros.append({"titulo": f["titulo"], "detalle": detalle, "url": f"/libro/{f['id']}"})
+        if len(libros) >= 4:
+            break
+    return JSONResponse({
+        "valores": [{"etiqueta": FACETAS[fa], "valor": v, "n": n, "url": _url({}, alternar=(fa, v))}
+                    for _, _, fa, v, n in valores[:5]],
+        "libros": libros,
+    })
+
+
 @app.get("/novedades", response_class=HTMLResponse)
 def novedades(request: Request, dias: int = 30):
     con = _con()
@@ -364,6 +441,37 @@ def novedades(request: Request, dias: int = 30):
                        (desde,)).fetchall()
     return plantillas.TemplateResponse(request, "novedades.html", {
         "grupos": grupos, "total": len(filas), "dias": dias, "auto": auto,
+    })
+
+
+ESTADOS_TELEGRAM = {
+    "descargado": "Descargado", "ya_en_biblioteca": "Ya lo tenías", "ya_en_entrada": "Ya en la entrada",
+    "repetido": "Repetido", "ignorado": "Ignorado", "error": "Error",
+}
+
+
+@app.get("/telegram", response_class=HTMLResponse)
+def telegram(request: Request, estado: str = ""):
+    con = _con()
+    canales = con.execute(
+        "SELECT c.*, (SELECT COUNT(*) FROM telegram_msgs m WHERE m.canal = c.canal AND m.estado='descargado') AS bajados "
+        "FROM telegram_canales c ORDER BY c.titulo COLLATE NOCASE").fetchall()
+    titulos = {c["canal"]: c["titulo"] for c in canales}
+    cuentas = dict(con.execute("SELECT estado, COUNT(*) FROM telegram_msgs GROUP BY estado").fetchall())
+    filtro, params = ("WHERE estado=?", [estado]) if estado in ESTADOS_TELEGRAM else ("", [])
+    mensajes = con.execute(f"SELECT * FROM telegram_msgs {filtro} ORDER BY procesado_en DESC, msg_id DESC LIMIT 150",
+                           params).fetchall()
+    # ¿Dónde está ahora lo descargado? (lo sigue el clasificador)
+    destinos = {}
+    for m in mensajes:
+        if m["archivo"]:
+            e = con.execute("SELECT id, estado, ruta_actual FROM entrada WHERE nombre IN (?, ?) "
+                            "ORDER BY id DESC LIMIT 1", (m["archivo"], m["archivo"].rsplit(".", 1)[0])).fetchone()
+            if e:
+                destinos[(m["canal"], m["msg_id"])] = e
+    return plantillas.TemplateResponse(request, "telegram.html", {
+        "canales": canales, "titulos": titulos, "cuentas": cuentas, "mensajes": mensajes, "destinos": destinos,
+        "estados": ESTADOS_TELEGRAM, "estado": estado,
     })
 
 

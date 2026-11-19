@@ -14,7 +14,7 @@
       <div>
         <h2><a href="/libro/{{ it.id }}">{{ it.titulo }}</a></h2>
         <p class="tenue ruta">{{ it.carpeta }}</p>
-        <p class="tenue">{{ [it.sistema, it.editorial or it.ext_editorial, it.publicado or it.anio]|select|join(' · ') }}</p>
+        <p class="tenue">{{ [it.sistema, it.editorial_unif or it.editorial or it.ext_editorial, it.publicado or it.anio]|select|join(' · ') }}</p>
         {{ candidatos(it.id, it.datos, volver) }}
       </div>
     </article>

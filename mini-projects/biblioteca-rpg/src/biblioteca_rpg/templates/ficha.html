@@ -26,13 +26,16 @@
       {% for etiqueta, faceta, valor in [
           ('Categoría', 'categoria', d.categoria), ('Formato', 'formato', d.formato),
           ('Sistema / línea', 'sistema', d.sistema), ('Edición', 'edicion', d.edicion),
-          ('Editorial', 'editorial', d.editorial), ('Ambientación', 'ambientacion', d.ambientacion),
+          ('Ambientación', 'ambientacion', d.ambientacion),
           ('Tipo', 'tipo', d.tipo), ('Idioma', 'idioma', d.idioma)] if valor %}
         <dt>{{ etiqueta }}</dt><dd><a href="{{ filtro(faceta, valor) }}">{{ valor }}</a></dd>
       {% endfor %}
-      {% if not d.editorial and d.ext_editorial %}
-        <dt>Editorial</dt><dd><a href="{{ filtro('editorial', d.ext_editorial) }}">{{ d.ext_editorial }}</a>
-          <span class="segun">según {{ origen.editorial }}</span></dd>
+      {% set original = d.editorial or d.ext_editorial %}
+      {% if original %}
+        {% set unif = d.editorial_unif or original %}
+        <dt>Editorial</dt><dd><a href="{{ filtro('editorial', unif) }}">{{ unif }}</a>
+          {% if not d.editorial %}<span class="segun">según {{ origen.editorial }}</span>{% endif %}
+          {% if unif != original %}<span class="segun">aparece como «{{ original }}»</span>{% endif %}</dd>
       {% endif %}
       {% if d.publicado %}<dt>Publicado</dt><dd>{{ d.publicado }} <span class="segun">según {{ origen.publicado }}</span></dd>{% endif %}
       {% if d.anio and d.anio != d.publicado %}<dt>{{ 'Año de la edición' if d.publicado else 'Año' }}</dt><dd>{{ d.anio }}</dd>{% endif %}

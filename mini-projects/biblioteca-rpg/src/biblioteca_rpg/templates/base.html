@@ -11,7 +11,9 @@
 <header class="cabecera">
   <a class="marca" href="/"><span class="dado">⬢</span> Biblioteca</a>
   <form class="buscador" action="/" method="get" role="search">
-    <input type="search" name="q" value="{{ q|default('') }}" placeholder="Buscar título, sistema, editorial…" autocomplete="off" aria-label="Buscar">
+    <input type="search" name="q" value="{{ q|default('') }}" placeholder="Buscar título, sistema, editorial…" autocomplete="off" aria-label="Buscar"
+           data-sugerir role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="sugerencias-busqueda">
+    <div class="sugerencias busqueda" id="sugerencias-busqueda" role="listbox" hidden></div>
     {% if carpeta %}<input type="hidden" name="carpeta" value="{{ carpeta }}">{% endif %}
     <button type="submit">Buscar</button>
   </form>
@@ -19,6 +21,7 @@
     {% set n_entrada = pendientes_entrada() %}
     <a href="/entrada">Entrada{% if n_entrada %} <span class="globo">{{ n_entrada }}</span>{% endif %}</a>
     <a href="/novedades">Novedades</a>
+    {% if hay_telegram() %}<a href="/telegram">Telegram</a>{% endif %}
     {% set n_revisar = pendientes_revisar() %}
     {% if n_revisar %}<a href="/revisar">Revisar <span class="globo">{{ n_revisar }}</span></a>{% endif %}
   </nav>

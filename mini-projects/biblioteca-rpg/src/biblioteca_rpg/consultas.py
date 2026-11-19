@@ -16,6 +16,7 @@ FACETAS = {
     "decada": "Década",
 }
 SIN_VALOR = "(sin indicar)"
+NO = "no_"  # prefijo de los filtros de exclusión: ?no_editorial=X = "todo menos X"
 POR_PAGINA = 60
 
 ORDENES = {
@@ -41,7 +42,7 @@ def _expr(faceta: str) -> str:
         # Año de publicación si se conoce (PDF o RPGGeek); si no, el de la edición de la ruta.
         return "CASE WHEN COALESCE(publicado, anio) IS NULL THEN NULL ELSE (COALESCE(publicado, anio) / 10) * 10 END"
     if faceta == "editorial":
-        return "COALESCE(editorial, ext_editorial)"
+        return "editorial_unif"  # nombre unificado (editoriales.py)
     return faceta
 
 
@@ -57,18 +58,32 @@ def construir_where(filtros: dict, q: str | None, carpeta: str | None, excluir: 
         # carpeta exacta o cualquier subcarpeta ('/' + 1 = '0')
         condiciones.append("(carpeta = ? OR (carpeta >= ? AND carpeta < ?))")
         params += [carpeta, carpeta + "/", carpeta + "0"]
-    for faceta, valores in filtros.items():
-        if faceta == excluir or not valores:
+    for clave, valores in filtros.items():
+        negado = clave.startswith(NO)
+        faceta = clave[len(NO):] if negado else clave
+        if faceta == excluir or not valores or faceta not in FACETAS:
             continue
         expr = _expr(faceta)
         partes = []
         normales = [v for v in valores if v != SIN_VALOR]
+        if faceta == "decada":
+            normales = [int(v) for v in normales if str(v).isdigit()]
+        sin_valor = SIN_VALOR in valores
+        if negado:
+            # "Todo menos X": lo que no tiene valor tampoco es X, así que se queda (salvo que se excluya).
+            if normales:
+                no_en = f"{expr} NOT IN ({','.join('?' * len(normales))})"
+                partes.append(no_en if sin_valor else f"({expr} IS NULL OR {no_en})")
+                params += normales
+            if sin_valor:
+                partes.append(f"{expr} IS NOT NULL")
+            if partes:
+                condiciones.append("(" + " AND ".join(partes) + ")")
+            continue
         if normales:
-            if faceta == "decada":
-                normales = [int(v) for v in normales if str(v).isdigit()]
             partes.append(f"{expr} IN ({','.join('?' * len(normales))})")
             params += normales
-        if SIN_VALOR in valores:
+        if sin_valor:
             partes.append(f"{expr} IS NULL")
         if partes:
             condiciones.append("(" + " OR ".join(partes) + ")")
@@ -104,7 +119,10 @@ def buscar(con: sqlite3.Connection, filtros: dict, q: str | None, carpeta: str |
 
 
 def facetas(con: sqlite3.Connection, filtros: dict, q: str | None, carpeta: str | None) -> dict:
-    """Recuentos de cada faceta, aplicando todos los filtros menos el de la propia faceta."""
+    """Recuentos de cada faceta, aplicando todos los filtros menos los de la propia faceta.
+
+    Así un valor excluido sigue en la lista, con su recuento, y se puede volver a incluir.
+    """
     res = {}
     for faceta in FACETAS:
         where, params = construir_where(filtros, q, carpeta, excluir=faceta)
@@ -115,7 +133,7 @@ def facetas(con: sqlite3.Connection, filtros: dict, q: str | None, carpeta: str 
         ).fetchall()
         valores = [(SIN_VALOR if f["v"] is None else str(f["v"]), f["n"]) for f in filas]
         # Una faceta con un solo valor "(sin indicar)" no aporta nada.
-        if len(valores) == 1 and valores[0][0] == SIN_VALOR and not filtros.get(faceta):
+        if len(valores) == 1 and valores[0][0] == SIN_VALOR and not filtros.get(faceta) and not filtros.get(NO + faceta):
             continue
         if valores:
             res[faceta] = valores

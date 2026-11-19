@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block titulo %}Telegram · Biblioteca{% endblock %}
+{% block contenido %}
+<section class="telegram">
+  <h1>Telegram</h1>
+  <p class="tenue">Se descarga a la carpeta de entrada solo lo que no tienes ya. Después lo clasifica el
+    clasificador como todo lo demás: lo dudoso espera en <a href="/entrada">Entrada</a>.</p>
+
+  <h2>Canales</h2>
+  {% if canales %}
+    <div class="envoltorio-tabla">
+      <table class="tabla">
+        <thead><tr><th>Canal</th><th>Último mensaje leído</th><th>Revisado</th><th class="num">Descargados</th></tr></thead>
+        <tbody>
+          {% for c in canales %}
+            <tr><td class="nombre">{{ c.titulo }} <span class="tenue">{{ c.canal }}</span></td>
+              <td class="num">{{ c.ultimo_id }}</td><td>{{ c.revisado_en|fecha }}</td><td class="num">{{ c.bajados }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="vacio">Todavía no se ha revisado ningún canal.</p>
+  {% endif %}
+
+  <h2>Ficheros</h2>
+  <nav class="filtros-estado" aria-label="Filtrar por estado">
+    <a class="chip{% if not estado %} activo{% endif %}" href="/telegram">Todos</a>
+    {% for clave, etiqueta in estados.items() %}
+      {% if cuentas.get(clave) %}
+        <a class="chip{% if estado == clave %} activo{% endif %}" href="/telegram?estado={{ clave }}">{{ etiqueta }} <span class="n">{{ cuentas[clave] }}</span></a>
+      {% endif %}
+    {% endfor %}
+  </nav>
+  {% if mensajes %}
+    <div class="envoltorio-tabla">
+      <table class="tabla">
+        <thead><tr><th>Fichero</th><th>Estado</th><th class="num">Tamaño</th><th>Canal</th><th>Fecha</th></tr></thead>
+        <tbody>
+          {% for m in mensajes %}
+            {% set dest = destinos.get((m.canal, m.msg_id)) %}
+            <tr>
+              <td class="nombre">{{ m.nombre }}
+                {% if m.texto %}<br><span class="tenue">{{ m.texto|truncate(140) }}</span>{% endif %}
+                {% if dest %}<br><span class="tenue">→ {% if dest.estado == 'pendiente' %}<a href="/entrada">esperando revisión</a>{% else %}{{ dest.ruta_actual }}{% endif %}</span>{% endif %}
+              </td>
+              <td><span class="estado {{ m.estado }}">{{ estados.get(m.estado, m.estado) }}</span>
+                {% if m.doc_id %}<br><a href="/libro/{{ m.doc_id }}">ver el tuyo</a>{% endif %}
+                {% if m.nota %}<br><span class="tenue">{{ m.nota }}</span>{% endif %}</td>
+              <td class="num">{{ m.tamano|tamano }}</td>
+              <td>{{ titulos.get(m.canal, m.canal) }}</td>
+              <td>{{ m.fecha|fecha }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="vacio">Nada todavía.</p>
+  {% endif %}
+</section>
+{% endblock %}

@@ -54,3 +54,33 @@ def test_ficha_pdf_y_portada_vacia(cliente):
     assert pdf.status_code == 200 and pdf.headers["content-type"] == "application/pdf"
     assert cliente.get(f"/portada/{doc_id}.jpg").headers["content-type"].startswith("image/svg")
     assert cliente.get("/libro/999999").status_code == 404
+
+
+def test_excluir_valor_de_faceta(cliente):
+    # "Todo menos FASA": quedan el de Catalyst y el que no tiene editorial.
+    r = cliente.get("/", params={"no_editorial": "FASA"})
+    assert "SR3 Core" not in r.text and "SR5 Core" in r.text and "Dragon 100" in r.text
+    assert "todo menos FASA" in r.text
+    # El valor excluido sigue en la lista lateral (para poder deshacerlo).
+    assert 'class="excluido"' in r.text
+    # Excluir también "(sin indicar)".
+    r = cliente.get("/", params=[("no_editorial", "FASA"), ("no_editorial", "(sin indicar)")])
+    assert "SR5 Core" in r.text and "Dragon 100" not in r.text and "SR3 Core" not in r.text
+
+
+def test_incluir_y_excluir_se_reemplazan():
+    from biblioteca_rpg.web import _url
+    assert _url({"editorial": ["FASA"]}, alternar=("no_editorial", "FASA")) == "/?no_editorial=FASA"
+    assert _url({"no_editorial": ["FASA"]}, alternar=("editorial", "FASA")) == "/?editorial=FASA"
+    assert _url({"no_editorial": ["FASA"]}, alternar=("no_editorial", "FASA")) == "/"
+
+
+def test_sugerencias(cliente):
+    r = cliente.get("/api/sugerencias", params={"q": "fas"}).json()
+    assert {"etiqueta": "Editorial", "valor": "FASA", "n": 1, "url": "/?editorial=FASA"} in r["valores"]
+    r = cliente.get("/api/sugerencias", params={"q": "sr3 co"}).json()
+    assert [l["titulo"] for l in r["libros"]] == ["SR3 Core"]
+    assert r["libros"][0]["url"].startswith("/libro/")
+    r = cliente.get("/api/sugerencias", params={"q": "shadowrun"}).json()
+    assert any(v["etiqueta"] == "Sistema / línea" for v in r["valores"])
+    assert cliente.get("/api/sugerencias", params={"q": "x"}).json() == {"valores": [], "libros": []}
