@@ -99,6 +99,9 @@
           {% if e.pdf_titulo and e.pdf_titulo != e.nombre %}<br>Título interno: {{ e.pdf_titulo }}{% endif %}
         </p>
         {% if e.origen_texto %}<p class="mensaje-tg" title="Mensaje de Telegram">✈ {{ e.origen_texto|truncate(300) }}</p>{% endif %}
+        {% if e.llm %}<p class="claude" title="Lo que dice Claude tras mirar la portada y las primeras páginas">✦ Claude
+          ({{ e.llm.seguridad }}{% if not e.llm.valida %}, carpeta no válida: {{ e.llm.carpeta }}{% endif %}):
+          {{ e.llm.juego }} · {{ e.llm.tipo }} — {{ e.llm.motivo }}</p>{% endif %}
         {% if e.estado == 'error' %}<p class="aviso">No se pudo procesar: {{ e.nota }}</p>{% endif %}
         {% if e.duplicado_de %}
           <p class="aviso">⚠ {% if e.n_pdfs and e.duplicados < e.n_pdfs %}{{ e.duplicados }} de {{ e.n_pdfs }} PDF ya están{% else %}Ya está{% endif %}
@@ -109,7 +112,7 @@
             <legend>¿A qué carpeta?</legend>
             {% for carpeta, pct in e.alternativas %}
               <label class="opcion"><input type="radio" name="destino" value="{{ carpeta }}" {% if loop.first %}checked{% endif %}>
-                <span class="ruta">{{ carpeta }}</span> <span class="confianza">{{ pct }}%</span></label>
+                <span class="ruta">{{ carpeta }}</span> <span class="confianza">{% if pct is none %}Claude{% else %}{{ pct }}%{% endif %}</span></label>
             {% endfor %}
             <label class="opcion otra"><input type="radio" name="destino" value="__otra" {% if not e.alternativas %}checked{% endif %}>
               <span class="buscador-carpeta">

@@ -338,3 +338,11 @@ main { padding: 16px 20px 40px; max-width: 1600px; margin: 0 auto; }
 .grupo .acciones { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 4px; }
 .plegar { display: flex; gap: 8px; margin: 0 0 12px; }
 .sugerencias .ejemplo { display: block; color: var(--tenue); font-size: 12px; font-family: inherit; }
+.claude { font-size: 13px; color: var(--tenue); margin: 4px 0 8px; padding: 6px 10px; border-left: 3px solid var(--acento); }
+
+/* Mover a la papelera (ficha) */
+form.en-linea { display: inline; margin: 0; }
+.boton.peligro { color: var(--peligro); border-color: var(--peligro); background: transparent; }
+.boton.peligro:hover { background: var(--peligro); color: var(--superficie); }
+.aviso-papelera { margin: .75rem 0; padding: .6rem .8rem; border: 1px dashed var(--peligro);
+  border-radius: var(--radio); color: var(--texto); display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }

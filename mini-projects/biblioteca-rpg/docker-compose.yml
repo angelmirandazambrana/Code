@@ -54,6 +54,10 @@ services:
       BIBLIOTECA_ENTRADA: "${ENTRADA:-_Inbox}"
       CLASIFICADOR_AUTO: "${CLASIFICADOR_AUTO:-0.9}"
       BIBLIOTECA_PROCESOS: "1"
+      # Segunda lectura con Claude para lo dudoso (sin clave, no se usa). Límite de gasto al mes.
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      LLM_MODELO: "${LLM_MODELO:-sonnet}"
+      LLM_MAX_DOLARES_MES: "${LLM_MAX_DOLARES_MES:-10}"
       TZ: "${TZ:-Europe/Madrid}"
     volumes:
       - "${BIBLIOTECA_HOST}:/biblioteca"      # lectura y ESCRITURA

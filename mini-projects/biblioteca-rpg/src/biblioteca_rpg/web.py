@@ -194,14 +194,35 @@ def ficha(request: Request, doc_id: int):
         if es_wargame else
         f"https://rpggeek.com/geeksearch.php?action=search&objecttype=rpgitem&q={quote_plus(busqueda)}"
     )
+    borrado = con.execute("SELECT * FROM borrados WHERE doc_id=? AND estado IN ('pedido', 'error') "
+                          "ORDER BY id DESC LIMIT 1", (doc_id,)).fetchone()
     return plantillas.TemplateResponse(request, "ficha.html", {
-        "d": d, "hermanos": hermanos, "migas": migas, "ruta_red": ruta_red,
+        "d": d, "hermanos": hermanos, "borrado": borrado, "migas": migas, "ruta_red": ruta_red,
         "enlace_tienda": f"{tienda}/en/browse?keyword={quote_plus(busqueda)}",
         "nombre_tienda": "Wargame Vault" if es_wargame else "DriveThruRPG",
         "enlace_geek": geek, "nombre_geek": "BoardGameGeek" if es_wargame else "RPGGeek",
         "filtro": lambda faceta, valor: _url({}, alternar=(faceta, str(valor))),
         "extras": extras, "origen": origen, "volver": f"/libro/{doc_id}",
     })
+
+
+@app.post("/libro/{doc_id}/papelera")
+def pedir_borrado(doc_id: int, accion: str = Form("pedir")):
+    """Anota que este libro sobra (repetido, mal escaneo…). Lo mueve a _Papelera el clasificador."""
+    con = _con()
+    d = con.execute("SELECT id, ruta, titulo, carpeta FROM docs WHERE id=?", (doc_id,)).fetchone()
+    if not d:
+        raise HTTPException(404, "No existe")
+    with con:
+        if accion == "anular":
+            con.execute("DELETE FROM borrados WHERE doc_id=? AND estado IN ('pedido', 'error')", (doc_id,))
+        elif accion == "pedir":
+            if not con.execute("SELECT 1 FROM borrados WHERE doc_id=? AND estado='pedido'", (doc_id,)).fetchone():
+                con.execute("INSERT INTO borrados (doc_id, ruta, titulo, pedido_en) VALUES (?, ?, ?, ?)",
+                            (doc_id, d["ruta"], d["titulo"], int(time.time())))
+        else:
+            raise HTTPException(400, "Acción desconocida")
+    return RedirectResponse(f"/libro/{doc_id}", status_code=303)
 
 
 @app.get("/revisar", response_class=HTMLResponse)
@@ -257,7 +278,7 @@ def _alternativas_grupo(carpeta: str, entradas: list[dict], n: int = 5) -> list[
     suma: dict[str, float] = {}
     for e in entradas:
         for c, pct in e.get("alternativas") or []:
-            suma[c] = suma.get(c, 0) + pct
+            suma[c] = suma.get(c, 0) + (pct if pct is not None else 60)  # None: la propone Claude
     otras = [c for c, _ in sorted(suma.items(), key=lambda x: -x[1]) if c != carpeta]
     return [carpeta, *otras[: n - 1]]
 
@@ -287,7 +308,7 @@ def agrupar_por_clasificar(entradas: list[dict]) -> list[dict]:
         juego = e["ruta_actual"].split(f"/{POR_CLASIFICAR}/", 1)[0]
         # Las alternativas que caen dentro del juego son las candidatas a subcarpeta.
         dentro = [[c, pct] for c, pct in e["alternativas"] if c.startswith(juego + "/")]
-        e["propuesta"], e["confianza"] = (dentro[0][0], dentro[0][1] / 100) if dentro else (None, 0)
+        e["propuesta"], e["confianza"] = (dentro[0][0], (dentro[0][1] or 60) / 100) if dentro else (None, 0)
         e["estado"] = "pendiente"  # para agrupar_pendientes
         por_juego.setdefault(juego, []).append(e)
     res = []
@@ -309,6 +330,7 @@ def entrada(request: Request, vista: str = ""):
         for f in con.execute(sql, params):
             e = dict(f)
             e["alternativas"] = json.loads(e["alternativas"] or "[]")
+            e["llm"] = json.loads(e["llm"]) if e.get("llm") else None
             out.append(e)
         return out
 

@@ -87,6 +87,21 @@ CREATE TABLE IF NOT EXISTS entrada (
 );
 CREATE INDEX IF NOT EXISTS ix_entrada_estado ON entrada(estado);
 
+-- Libros que se piden quitar desde la ficha (repetidos, malos escaneos…). La web solo anota la
+-- petición; el clasificador mueve el fichero a _Papelera/<misma ruta> y quita la ficha.
+-- estado: pedido, hecho, error.
+CREATE TABLE IF NOT EXISTS borrados (
+    id INTEGER PRIMARY KEY,
+    doc_id INTEGER NOT NULL,
+    ruta TEXT NOT NULL,
+    titulo TEXT,
+    estado TEXT NOT NULL DEFAULT 'pedido',
+    papelera TEXT,                      -- dónde quedó, relativa a la raíz
+    nota TEXT,
+    pedido_en INTEGER, hecho_en INTEGER
+);
+CREATE INDEX IF NOT EXISTS ix_borrados_estado ON borrados(estado);
+
 -- Telegram: hasta dónde se ha leído cada canal y qué se hizo con cada fichero.
 CREATE TABLE IF NOT EXISTS telegram_canales (
     canal TEXT PRIMARY KEY,             -- id de Telegram (p. ej. -1001234567890)
@@ -159,6 +174,7 @@ END;
 
 COLUMNAS_ENTRADA = {
     "origen_texto": "TEXT",      # mensaje de Telegram que acompañaba al fichero
+    "llm": "TEXT",               # lo que dijo Claude (JSON: carpeta, seguridad, juego, tipo, motivo)
 }
 
 

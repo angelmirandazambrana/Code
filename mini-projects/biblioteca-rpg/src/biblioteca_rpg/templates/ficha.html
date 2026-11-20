@@ -20,7 +20,28 @@
       <a class="boton principal" href="/pdf/{{ d.id }}/{{ d.nombre|qp }}" {% if d.nombre|ext == 'PDF' %}target="_blank" rel="noopener">Abrir PDF{% else %}download>Descargar {{ d.nombre|ext }}{% endif %}</a>
       {% if d.nombre|ext == 'PDF' %}<a class="boton" href="/pdf/{{ d.id }}/{{ d.nombre|qp }}" download>Descargar</a>{% endif %}
       {% if ruta_red %}<button class="boton" type="button" data-copiar="{{ ruta_red }}">Copiar ruta de red</button>{% endif %}
+      {% if not borrado %}
+      <form class="en-linea" method="post" action="/libro/{{ d.id }}/papelera"
+            data-pregunta="¿Mover «{{ d.nombre }}» a la papelera y quitarlo del catálogo?&#10;&#10;No se borra: queda en _Papelera y se puede recuperar."
+            onsubmit="return confirm(this.dataset.pregunta)">
+        <input type="hidden" name="accion" value="pedir">
+        <button class="boton peligro" type="submit">🗑 Mover a la papelera</button>
+      </form>
+      {% endif %}
     </div>
+    {% if borrado %}
+    <div class="aviso-papelera">
+      {% if borrado.estado == 'pedido' %}
+        Se moverá a <code>_Papelera</code> en el próximo minuto y desaparecerá del catálogo.
+      {% else %}
+        No se pudo mover a la papelera: {{ borrado.nota }}
+      {% endif %}
+      <form class="en-linea" method="post" action="/libro/{{ d.id }}/papelera">
+        <input type="hidden" name="accion" value="anular">
+        <button class="boton mini" type="submit">{% if borrado.estado == 'pedido' %}No, déjalo{% else %}Quitar el aviso{% endif %}</button>
+      </form>
+    </div>
+    {% endif %}
 
     <dl class="datos">
       {% for etiqueta, faceta, valor in [

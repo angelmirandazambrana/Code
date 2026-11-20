@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 
 from . import config as config_mod
-from . import packs, texto_pdf
+from . import llm, packs, texto_pdf
 from .clasificador import (
     VECINOS,
     Bayes,
@@ -261,10 +261,44 @@ def descomprimir(con, cfg, archivo: Path, log: Registro) -> None:
     log("Guardar comprimido", rel, _rel(cfg, guardado))
 
 
+def nombre_legible(nombre: str) -> str | None:
+    """Un nombre que no es UTF-8 (sale de un zip de DOS/Windows: "\\udc82\\udcae…") en su forma legible.
+    None si ya es válido. CP866 si da cirílico (zips rusos), si no CP437 (el de los zip por defecto)."""
+    try:
+        nombre.encode("utf-8")
+        return None
+    except UnicodeEncodeError:
+        pass
+    crudo = nombre.encode("utf-8", "surrogateescape")
+    ruso = crudo.decode("cp866", errors="replace")
+    if sum("Ѐ" <= c <= "ӿ" for c in ruso) >= len(ruso.replace(" ", "")) / 2:
+        return ruso
+    return crudo.decode("cp437", errors="replace")
+
+
+def arreglar_nombres(carpeta: Path, log: Registro | None = None) -> int:
+    """Renombra (de dentro afuera) lo que tenga un nombre no UTF-8: si no, no cabe en el catálogo."""
+    n = 0
+    for dirpath, dirnames, filenames in os.walk(carpeta, topdown=False):
+        for nombre in dirnames + filenames:
+            nuevo = nombre_legible(nombre)
+            if nuevo is None:
+                continue
+            viejo = Path(dirpath) / nombre
+            final = _libre(Path(dirpath) / nuevo.replace("/", "_"))
+            viejo.rename(final)
+            n += 1
+            if log:
+                log("Renombrar", str(viejo).encode("utf-8", "surrogateescape").decode("utf-8", "replace"), str(final),
+                    "nombre no UTF-8 (zip)")
+    return n
+
+
 def escanear(con, cfg, log: Registro) -> int:
     dir_entrada = cfg.raiz / cfg.entrada
     if not dir_entrada.is_dir():
         return 0
+    arreglar_nombres(dir_entrada, log)
     activos = {r["ruta_actual"]: r for r in con.execute(
         f"SELECT id, ruta_actual, estado FROM entrada WHERE estado IN ({','.join('?' * len(ACTIVOS))})", ACTIVOS)}
     ahora = time.time()
@@ -425,6 +459,7 @@ def analizar(con, cfg) -> int:
         if f["es_carpeta"]:
             p = junto_a_sus_hermanas(p, f["nombre"])
         destino = p["propuesta"]
+        llm_json = None
         if todo_duplicado:
             estado, auto, destino = ("aprobado", 1, DUPLICADOS) if cfg.auto else ("pendiente", 0, DUPLICADOS)
         elif es_seguro(p, cfg.auto):
@@ -434,7 +469,19 @@ def analizar(con, cfg) -> int:
             estado, auto, destino = "aprobado", 1, madre_segura(p, cfg.auto)
         else:
             estado, auto = "pendiente", 0
+            # Segunda lectura con Claude: mira la portada y las primeras páginas.
+            claude = None if f["es_carpeta"] and not i["pdfs"] else llm.segunda_lectura(
+                con, cfg, f["id"], f["nombre"], ruta_portada_entrada(cfg, f["id"]), i["principal"], p)
+            if claude:
+                llm_json = json.dumps(claude, ensure_ascii=False)
+                if claude["valida"]:
+                    # Su carpeta, la primera de las opciones para revisar.
+                    otras = [a for a in p["alternativas"] if a[0] != claude["carpeta"]]
+                    p = {**p, "alternativas": [[claude["carpeta"], None], *otras][:6]}
+                if claude["valida"] and claude["seguridad"] == "alta" and cfg.auto:
+                    estado, auto, destino = "aprobado", 1, claude["carpeta"]
         with con:
+            con.execute("UPDATE entrada SET llm=? WHERE id=?", (llm_json, f["id"]))
             con.execute(
                 "UPDATE entrada SET tamano=?, n_pdfs=?, paginas=?, pdf_titulo=?, editorial=?, publicado=?, "
                 "portada=?, duplicado_de=?, duplicados=?, propuesta=?, confianza=?, apoyos=?, alternativas=?, "
@@ -447,6 +494,7 @@ def analizar(con, cfg) -> int:
                  int(time.time()) if estado == "aprobado" else None, origen_texto or None, f["id"]),
             )
         print(f"  {f['nombre']}: {estado} -> {destino or '-'} ({p['confianza']:.0%}, {p['apoyos']} apoyos)"
+              f"{'  [Claude]' if auto and llm_json and destino and json.loads(llm_json)['carpeta'] == destino else ''}"
               f"{'  DUPLICADO' if todo_duplicado else ''}", flush=True)
     return len(filas)
 
@@ -559,6 +607,38 @@ def ejecutar_aprobados(con, cfg, log: Registro) -> int:
     return len(filas)
 
 
+PAPELERA = "_Papelera"
+
+
+def ejecutar_borrados(con, cfg, log: Registro) -> int:
+    """Lo pedido desde la ficha: el fichero va a _Papelera/<su ruta> (no se borra) y la ficha se quita."""
+    from .indexador import ruta_portada
+    filas = con.execute("SELECT * FROM borrados WHERE estado='pedido' ORDER BY id").fetchall()
+    for f in filas:
+        origen = cfg.raiz / f["ruta"]
+        try:
+            if not origen.is_file():
+                raise FileNotFoundError(f"ya no está: {f['ruta']}")
+            destino = _libre(cfg.raiz / PAPELERA / f["ruta"])
+            destino.parent.mkdir(parents=True, exist_ok=True)
+            _renombrar(origen, destino)
+        except OSError as ex:
+            with con:
+                con.execute("UPDATE borrados SET estado='error', nota=?, hecho_en=? WHERE id=?",
+                            (str(ex)[:300], int(time.time()), f["id"]))
+            print(f"  no se pudo quitar {f['ruta']}: {ex}", file=sys.stderr)
+            continue
+        rel = _rel(cfg, destino)
+        with con:
+            con.execute("DELETE FROM docs WHERE id=?", (f["doc_id"],))
+            con.execute("UPDATE borrados SET estado='hecho', papelera=?, hecho_en=? WHERE id=?",
+                        (rel, int(time.time()), f["id"]))
+        ruta_portada(cfg.portadas, f["doc_id"]).unlink(missing_ok=True)
+        log("Papelera", f["ruta"], rel, "quitado desde la ficha")
+        print(f"  a la papelera: {f['ruta']}", flush=True)
+    return len(filas)
+
+
 def actualizar_catalogo(con, cfg, carpetas: list[str]) -> None:
     r = sincronizar(con, cfg, carpetas)
     # Un pack que entra en assets (o sale): se rehace el índice de su carpeta madre.
@@ -579,6 +659,7 @@ def pasada(con, cfg) -> None:
     escanear(con, cfg, log)
     analizar(con, cfg)
     ejecutar_aprobados(con, cfg, log)
+    ejecutar_borrados(con, cfg, log)
 
 
 def main(argv=None) -> None:

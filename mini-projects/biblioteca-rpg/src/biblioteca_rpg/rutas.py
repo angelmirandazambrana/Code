@@ -74,6 +74,15 @@ TIPOS = [
     (re.compile(r"^(supplements?|suplementos?)$", re.I), "Suplemento"),
     (re.compile(r"^_gm books$", re.I), "Recursos para el DJ"),
     (re.compile(r"^(warbands?|army ?lists?|codex|codices)$", re.I), "Listas de ejército"),
+    # Tipos del esquema nuevo (docs/esquema_carpetas.md).
+    (re.compile(r"^(core rules|rules)$", re.I), "Reglas"),
+    (re.compile(r"^army books$", re.I), "Listas de ejército"),
+    (re.compile(r"^errata & faq$", re.I), "Erratas y FAQ"),
+    (re.compile(r"^scenarios & campaigns$", re.I), "Escenarios y campañas"),
+    (re.compile(r"^organized play$", re.I), "Juego organizado"),
+    (re.compile(r"^game aids$", re.I), "Ayudas de juego"),
+    (re.compile(r"^fiction$", re.I), "Ficción"),
+    (re.compile(r"^background$", re.I), "Trasfondo"),
 ]
 TIPOS_NOMBRE = [
     (re.compile(r"\b(adventure|module|scenario|adv -)\b", re.I), "Aventura"),
@@ -81,10 +90,10 @@ TIPOS_NOMBRE = [
 ]
 
 IDIOMAS = [
-    (re.compile(r"\[(fr|french|fran[cç]ais)\]|\bjdr francais\b|\(fr\)", re.I), "Francés"),
-    (re.compile(r"\[(es|spanish|espa[nñ]ol)\]|\(es\)|\brevistas es\b|\.en\.es\.", re.I), "Español"),
-    (re.compile(r"\[(de|german|deutsch)\]|\(de\)", re.I), "Alemán"),
-    (re.compile(r"\[(it|italian|italiano)\]|\(it\)", re.I), "Italiano"),
+    (re.compile(r"\[(fr|french|fran[cç]ais)\]|\bjdr francais\b|\(fr\)|(^|/)\s*french\s*(/|$)", re.I), "Francés"),
+    (re.compile(r"\[(es|spanish|espa[nñ]ol)\]|\(es\)|\brevistas es\b|\.en\.es\.|(^|/)\s*spanish\s*(/|$)", re.I), "Español"),
+    (re.compile(r"\[(de|german|deutsch)\]|\(de\)|(^|/)\s*german\s*(/|$)", re.I), "Alemán"),
+    (re.compile(r"\[(it|italian|italiano)\]|\(it\)|(^|/)\s*italian\s*(/|$)", re.I), "Italiano"),
     (re.compile(r"\[(pl|polish)\]|\(pl\)|\bmagia i miecz\b", re.I), "Polaco"),
 ]
 

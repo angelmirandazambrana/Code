@@ -421,3 +421,42 @@ def test_codigo_de_serie():
     p = por_serie(Bayes(filas), "DDAL09-06 - Infernal Insurgency.pdf")
     assert p["propuesta"] == s9 and es_seguro(p, 0.9)        # 10 de 11
     assert por_serie(Bayes(filas), "DDAL08-03 - Nuevo.pdf") is None  # solo 2 de la serie
+
+
+def test_mover_a_la_papelera_desde_la_ficha(entorno):
+    import importlib
+
+    cfg, con, raiz, entrada = entorno
+    d = con.execute("SELECT id, ruta FROM docs WHERE nombre='Shadowrun Run Faster.pdf'").fetchone()
+    from biblioteca_rpg import web
+    importlib.reload(web)
+    cli = TestClient(web.app)
+    assert "Mover a la papelera" in cli.get(f"/libro/{d['id']}").text
+    # Pedir y anular: no pasa nada.
+    cli.post(f"/libro/{d['id']}/papelera", data={"accion": "pedir"})
+    assert "próximo minuto" in cli.get(f"/libro/{d['id']}").text
+    cli.post(f"/libro/{d['id']}/papelera", data={"accion": "anular"})
+    entrada.pasada(con, cfg)
+    assert (raiz / d["ruta"]).is_file()
+    # Pedir de verdad: el clasificador lo mueve a _Papelera con su ruta y quita la ficha.
+    cli.post(f"/libro/{d['id']}/papelera", data={"accion": "pedir"})
+    cli.post(f"/libro/{d['id']}/papelera", data={"accion": "pedir"})  # dos veces: una sola petición
+    entrada.pasada(con, cfg)
+    assert not (raiz / d["ruta"]).exists()
+    assert (raiz / "_Papelera" / d["ruta"]).is_file()
+    assert not con.execute("SELECT 1 FROM docs WHERE id=?", (d["id"],)).fetchone()
+    assert not con.execute("SELECT 1 FROM docs_fts WHERE docs_fts MATCH 'faster'").fetchone()
+    assert [r["estado"] for r in con.execute("SELECT estado FROM borrados")] == ["hecho"]
+    assert cli.get(f"/libro/{d['id']}").status_code == 404
+    # La papelera no entra en el catálogo.
+    from biblioteca_rpg import indexador
+    indexador.sincronizar(con, cfg, cfg.areas)
+    assert not con.execute("SELECT 1 FROM docs WHERE ruta LIKE '_Papelera/%'").fetchone()
+
+
+def test_nombre_no_utf8_de_un_zip():
+    from biblioteca_rpg.entrada import nombre_legible
+    raro = b"\x82\xae\xa9\xad\xa0 \x80\xab\xae\xa9".decode("utf-8", "surrogateescape")  # cp866
+    assert nombre_legible(raro) == "Война Алой"
+    assert nombre_legible("Normal ñ.pdf") is None
+    assert nombre_legible(b"Caf\x82.pdf".decode("utf-8", "surrogateescape")) == "Café.pdf"  # cp437
