@@ -188,3 +188,36 @@ def test_base_mezclada_deja_lo_que_no_tiene_destino(tmp_path, monkeypatch):
     reo.ejecutar_tabla(con, cfg, "prueba", tabla, ["Wargames/Miniaturas"], True, mezclada=True)
     assert (raiz / "Wargames/Games Workshop/Mordheim/Rules/b.txt").is_file()   # va con su libro
     assert (raiz / "Wargames/Miniaturas/Sueltos/a.jpg").is_file()              # sin destino: se queda
+
+
+def test_oleada_e_referencia():
+    from biblioteca_rpg.oleadas import destino_referencia as d
+    assert d("Wargames/_Referencia/Historia militar/Osprey") == "Wargames/_Reference/Military History/Osprey"
+    assert d("Wargames/_Referencia") == "Wargames/_Reference/Military History"
+    assert d("Wargames/_Pintura y modelismo/How to painting & modelling/GW") == "Wargames/_Reference/Painting & Modelling/GW"
+    assert d("Wargames/Janes/Jane's Defence") == "Wargames/_Reference/Jane's/Jane's Defence"
+    assert d("Wargames/Otra") is None
+
+
+def test_modo_estricto_en_carpetas_mezcladas(tmp_path, monkeypatch):
+    from biblioteca_rpg import config, db, indexador
+    raiz = tmp_path / "biblio"
+    _pdf(raiz / "RPG/Mezcla/Tema/a.pdf", "a")
+    _pdf(raiz / "RPG/Mezcla/Tema/b.pdf", "b")
+    (raiz / "RPG/Mezcla/Tema/a.txt").write_text("a")
+    _pdf(raiz / "RPG/Mezcla/Juego X/x.pdf", "x")
+    (raiz / "RPG/Mezcla/Juego X/x.jpg").write_bytes(b"jpg")
+    (raiz / "RPG/Mezcla/Otra sin libros").mkdir(parents=True)
+    (raiz / "RPG/Mezcla/Otra sin libros/z.jpg").write_bytes(b"jpg")
+    (raiz / "_Inbox").mkdir()
+    monkeypatch.setenv("BIBLIOTECA_RAIZ", str(raiz))
+    monkeypatch.setenv("BIBLIOTECA_DATOS", str(tmp_path / "datos"))
+    cfg = config.cargar()
+    con = db.conectar(cfg.db)
+    indexador.sincronizar(con, cfg, cfg.areas)
+    tabla = [("RPG/Mezcla/Tema/a.pdf", "RPG/A/Core Rules/a.pdf"),          # b.pdf se queda
+             ("RPG/Mezcla/Juego X/x.pdf", "RPG/X/Core Rules/x.pdf")]
+    reo.ejecutar_tabla(con, cfg, "prueba", tabla, ["RPG/Mezcla"], True, mezclada=True, estricta=True)
+    assert (raiz / "RPG/X/Core Rules/x.jpg").is_file()                     # toda su carpeta va junta
+    assert (raiz / "RPG/Mezcla/Tema/a.txt").is_file()                      # su carpeta no se mueve entera
+    assert (raiz / "RPG/Mezcla/Otra sin libros/z.jpg").is_file()           # sin libros: se queda

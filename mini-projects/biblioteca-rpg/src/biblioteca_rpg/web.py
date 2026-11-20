@@ -4,6 +4,7 @@
 """
 
 import json
+import re
 import sqlite3
 import time
 from pathlib import Path
@@ -163,6 +164,30 @@ def inicio(request: Request, q: str = "", carpeta: str = "", orden: str = "", pa
     })
 
 
+# Carpetas que solo agrupan juegos (no son un juego) en Juegos de mesa y Wargames.
+AGRUPAN_JUEGOS = {"Card games", "Board games", "_Sueltos", "Days of Wonder", "Milton Bradley", "Other Publishers"}
+
+
+def _nombre_de_juego(texto: str) -> str:
+    """'Blue Moon City - Cards' -> 'Blue Moon City'; 'Photosynthesis PnP' -> 'Photosynthesis'."""
+    t = re.sub(r"\s*[\(\[][^)\]]*[\)\]]", "", texto)            # (Z-Man), [multi], (166115394)
+    t = re.split(r"\s+-\s+|:\s", t)[0]                         # lo que va tras " - " es el producto
+    t = re.sub(r"\s*(&|and)\s+expansions?$|\s+pnp$|\s+print (and|&) play$", "", t, flags=re.I)
+    return t.strip() or texto
+
+
+def juego_para_bgg(carpeta: str, titulo: str) -> str:
+    """Nombre del juego para buscar en BoardGameGeek, sacado de la ruta o, si no, del título."""
+    p = carpeta.split("/")
+    if p[0] == "Juegos de mesa":
+        juego = next((s for s in p[1:] if s not in AGRUPAN_JUEGOS and not s.startswith("_")), None)
+    elif p[0] == "Wargames" and len(p) > 2 and not p[1].startswith("_"):
+        juego = p[2] if p[2] != "_Por clasificar" else None   # Wargames/<Editorial>/<Juego>/…
+    else:
+        juego = None
+    return _nombre_de_juego(juego or titulo)
+
+
 @app.get("/libro/{doc_id}", response_class=HTMLResponse)
 def ficha(request: Request, doc_id: int):
     con = _con()
@@ -188,6 +213,10 @@ def ficha(request: Request, doc_id: int):
               for k, v in json.loads(d["origen"] or "{}").items()}
     busqueda = d["titulo"]
     es_wargame = d["categoria"] in ("Wargames", "Juegos de mesa")
+    if es_wargame:
+        # BGG tiene una ficha por juego, no por PDF: se busca el juego ("Blue Moon City"),
+        # no el fichero ("Blue Moon City - Cards"), que no encuentra nada.
+        busqueda = juego_para_bgg(d["carpeta"] or "", d["titulo"] or "")
     tienda = "https://www.wargamevault.com" if es_wargame else "https://www.drivethrurpg.com"
     geek = (
         f"https://boardgamegeek.com/geeksearch.php?action=search&objecttype=boardgame&q={quote_plus(busqueda)}"

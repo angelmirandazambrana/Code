@@ -237,6 +237,9 @@ def emparejar(cliente: Cliente, doc: dict) -> dict:
     empate = len(puntuados) > 1 and puntuados[1]["puntos"] >= mejor["puntos"] - 0.02
     if mejor["puntos"] >= UMBRAL_AUTO and not empate:
         estado = "auto"
+    elif tipo == "boardgame" and mejor["puntos"] >= UMBRAL_REVISAR:
+        # Wargames y juegos de mesa: los datos de BGG se dan por buenos, sin revisión a mano.
+        estado = "auto"
     elif mejor["puntos"] >= UMBRAL_REVISAR:
         estado = "pendiente"
     else:

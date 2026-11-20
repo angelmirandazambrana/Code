@@ -429,6 +429,47 @@ def ensayo_d(con, cfg) -> list[list[str]]:
     return propuestas
 
 
+# --- Oleada E1: las carpetas de consulta de Wargames, juntas en _Reference -------------------------
+
+REFERENCIA = "Wargames/_Reference"
+# (carpeta vieja, primera subcarpeta o None para la raíz) -> carpeta nueva
+MAPA_REFERENCIA = [
+    ("Wargames/_Referencia", "Historia militar", "Military History"),
+    ("Wargames/_Referencia", "Featherstone", "Wargaming Classics/Featherstone"),
+    ("Wargames/_Referencia", "Charles S Grant", "Wargaming Classics/Charles S Grant"),
+    ("Wargames/_Referencia", "Catalogos", "Catalogues"),
+    ("Wargames/_Referencia", None, "Military History"),
+    ("Wargames/_Pintura y modelismo", "How to painting & modelling", "Painting & Modelling"),
+    ("Wargames/_Pintura y modelismo", None, "Painting & Modelling"),
+    ("Wargames/Janes", None, "Jane's"),
+]
+
+
+def destino_referencia(carpeta: str) -> str | None:
+    for vieja, sub, nueva in MAPA_REFERENCIA:
+        if sub and (carpeta == f"{vieja}/{sub}" or carpeta.startswith(f"{vieja}/{sub}/")):
+            return f"{REFERENCIA}/{nueva}{carpeta[len(vieja) + len(sub) + 1:]}"
+        if sub is None and (carpeta == vieja or carpeta.startswith(vieja + "/")):
+            return f"{REFERENCIA}/{nueva}{carpeta[len(vieja):]}"
+    return None
+
+
+def referencia(con, cfg, de_verdad: bool) -> None:
+    from .reorganizar import ejecutar_plan, planificar
+    bases = sorted({v for v, _, _ in MAPA_REFERENCIA})
+    plan = []
+    for base in bases:
+        tabla = [(r["ruta"], f"{destino_referencia(r['carpeta'])}/{r['nombre']}") for r in con.execute(
+            "SELECT ruta, carpeta, nombre FROM docs WHERE carpeta = ? OR carpeta LIKE ?", (base, base + "/%"))]
+        if tabla:
+            plan += planificar(cfg, tabla, base, mezclada=True)
+    # Lo que no tiene libros catalogados (los .7z de _Digital): la carpeta entera.
+    if (cfg.raiz / "Wargames/_Digital").is_dir():
+        plan.append(("carpeta", "Wargames/_Digital", f"{REFERENCIA}/Digital"))
+    plan.sort(key=lambda x: {"carpeta": 0, "fichero": 1, "libro": 2}[x[0]])
+    ejecutar_plan(con, cfg, "oleada_E_referencia", plan, bases, de_verdad)
+
+
 EDITORIALES_SUELTAS = {"Warfrog Games", "Wargamer Games Studio", "Game Works", "Just Games", "The Perfect Captain",
                        "Academy Games"}
 MISMA_EDITORIAL = {"ICE": "Iron Crown Enterprises", "Dadi&Piombo": "Dadi & Piombo"}
@@ -542,7 +583,7 @@ def _sin_series_pequenas(propuestas: list[list[str]]) -> None:
 
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("orden", choices=["ensayo", "ejecutar", "restos"])
+    ap.add_argument("orden", choices=["ensayo", "ejecutar", "restos", "referencia"])
     ap.add_argument("oleada")
     ap.add_argument("--csv")
     ap.add_argument("--ejecutar", action="store_true")
@@ -551,6 +592,8 @@ def main(argv=None) -> None:
     con = conectar(cfg.db)
     if args.orden == "restos":
         restos_d(con, cfg, args.ejecutar)
+    elif args.orden == "referencia":
+        referencia(con, cfg, args.ejecutar)
     elif args.orden == "ensayo":
         ensayo(con, args.oleada, args.csv, cfg)
     else:
@@ -558,7 +601,7 @@ def main(argv=None) -> None:
             tabla = [(r[0], r[1]) for r in list(csv.reader(f, delimiter=";"))[1:]]
         bases = sorted({"/".join(o.split("/")[:2]) for o, _ in tabla})
         ejecutar_tabla(con, cfg, f"oleada_{args.oleada}", tabla, bases, args.ejecutar,
-                       mezclada=args.oleada == "D")
+                       mezclada=args.oleada in ("D", "E"), estricta=args.oleada == "E")
     sys.exit(0)
 
 

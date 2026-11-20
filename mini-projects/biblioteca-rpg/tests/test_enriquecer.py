@@ -74,6 +74,8 @@ def test_emparejar_auto_pendiente_y_nada():
     c2 = ClienteFalso({"Tomb Horrors Remix": [{"id": 1, "nombre": "Tomb of Horrors", "anio": 1978}]},
                       {1: _ficha(1, "Tomb of Horrors", 1978, "TSR")})
     assert geek.emparejar(c2, dudoso)["estado"] == "pendiente"
+    # Lo mismo en un wargame o juego de mesa: los datos de BGG se dan por buenos.
+    assert geek.emparejar(c2, {**dudoso, "categoria": "Wargames"})["estado"] == "auto"
 
     assert geek.emparejar(ClienteFalso({}, {}), doc)["estado"] == "sin_resultado"
 

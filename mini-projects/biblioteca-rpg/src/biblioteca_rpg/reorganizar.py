@@ -252,7 +252,7 @@ def _leer_tabla(ruta: str) -> list[tuple[str, str]]:
 
 
 def planificar(cfg, tabla: list[tuple[str, str]], origen_base: str,
-               mezclada: bool = False) -> list[tuple[str, str, str]]:
+               mezclada: bool = False, catalogados: set[str] | None = None) -> list[tuple[str, str, str]]:
     """[(clase, origen, destino)] con los libros de la tabla y todo lo demás que hay en sus carpetas.
 
     - Ficheros sin ficha (jpg, txt, mp3…) junto a libros: van a donde van la mayoría de esos libros.
@@ -260,6 +260,9 @@ def planificar(cfg, tabla: list[tuple[str, str]], origen_base: str,
       nombre, a donde va la mayoría de los libros de la carpeta que las contiene.
     - `mezclada` (una base con muchos juegos, como Wargames/Miniaturas): lo que no tiene libros de la
       tabla en su carpeta ni por encima se queda donde está, en vez de ir al destino más común.
+    - `catalogados` (modo estricto, para carpetas donde cada libro es de un juego distinto): todos los
+      libros del catálogo que hay en la base. Un fichero sin ficha solo acompaña a los libros de SU
+      carpeta, si todos se mueven y al mismo sitio; las carpetas sin libros se quedan.
     """
     plan = [("libro", o, d) for o, d in tabla]
     votos: dict[str, Counter] = {}
@@ -273,7 +276,15 @@ def planificar(cfg, tabla: list[tuple[str, str]], origen_base: str,
             con_libros.add("/".join(partes[: i + 1]))
     libros = {o for o, _ in tabla}
 
+    estricta = catalogados is not None
+    if estricta:
+        en_carpeta = Counter(r.rsplit("/", 1)[0] for r in catalogados)
+        destino_de = {c: v.most_common(1)[0][0] for c, v in votos.items()
+                      if len(v) == 1 and sum(v.values()) == en_carpeta[c]}
+
     def destino_cercano(carpeta: str) -> str | None:
+        if estricta:
+            return destino_de.get(carpeta)
         while carpeta not in destino_de and "/" in carpeta and carpeta != origen_base:
             carpeta = carpeta.rsplit("/", 1)[0]
         if mezclada:
@@ -289,6 +300,8 @@ def planificar(cfg, tabla: list[tuple[str, str]], origen_base: str,
         if destino is None:
             continue  # base mezclada: no hay a dónde llevarlo, se queda
         if d.is_dir() and rel not in con_libros:
+            if estricta:
+                continue
             plan.append(("carpeta", rel, f"{destino}/{d.name}"))
         elif d.is_file() and rel not in libros:
             plan.append(("fichero", rel, f"{destino}/{d.name}"))
@@ -328,13 +341,14 @@ def ejecutar(con, cfg, clave: str, tabla_csv: str, de_verdad: bool) -> str | Non
 
 
 def ejecutar_tabla(con, cfg, etiqueta: str, tabla: list[tuple[str, str]], bases: list[str],
-                   de_verdad: bool, mezclada: bool = False) -> str | None:
+                   de_verdad: bool, mezclada: bool = False, estricta: bool = False) -> str | None:
     """Mueve los libros de la tabla y lo que los acompaña en cada una de las carpetas `bases`."""
     plan = []
     for base in bases:
         propia = [(o, d) for o, d in tabla if o.startswith(base + "/")]
         if propia:
-            plan += planificar(cfg, propia, base, mezclada)
+            catalogados = {r[0] for r in con.execute("SELECT ruta FROM docs WHERE ruta LIKE ?", (base + "/%",))}                 if estricta else None
+            plan += planificar(cfg, propia, base, mezclada, catalogados)
     return ejecutar_plan(con, cfg, etiqueta, plan, bases, de_verdad)
 
 
