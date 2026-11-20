@@ -82,7 +82,9 @@ def sincronizar(con, cfg, carpetas: list[str]) -> dict:
     with con:
         con.executemany(
             f"INSERT INTO docs (ruta, {cols}, tamano, mtime, llegado_en, actualizado_en) "
-            f"VALUES (?, {marcas}, ?, ?, ?, ?)",
+            f"VALUES (?, {marcas}, ?, ?, ?, ?) "
+            # El clasificador también pone al día el catálogo: si ya lo añadió él, se deja.
+            f"ON CONFLICT(ruta) DO NOTHING",
             nuevos,
         )
         # Cambió el fichero: hay que volver a sacar portada y datos del PDF.
@@ -284,6 +286,10 @@ def main(argv=None) -> None:
         r = sincronizar(con, cfg, carpetas)
         print(f"Catálogo: {r['nuevos']} nuevos, {r['cambiados']} cambiados, {r['iguales']} sin cambios, "
               f"{r['borrados']} borrados ({time.time() - t:.0f} s)")
+        from . import packs  # aquí: packs importa clasificador
+        en_assets = [c for c in carpetas if c == packs.RAIZ or c.startswith(packs.RAIZ + "/")]
+        if en_assets:
+            print(f"Carpetas de assets para el clasificador: {packs.indexar(con, cfg, en_assets)}")
 
     if args.reintentar_errores:
         with con:

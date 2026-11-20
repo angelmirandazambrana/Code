@@ -80,7 +80,76 @@ def proponer(con: sqlite3.Connection, texto: str, editorial: str | None = None,
         "confianza": round(orden[0][1] / total, 3),
         "apoyos": apoyos[propuesta],
         "alternativas": [[c, round(v / total * 100)] for c, v in orden[:5]],
+        **_madre(votos, apoyos, total),
     }
+
+
+# --- Si no está clara la carpeta, ¿lo está el juego? ------------------------------------
+#
+# A menudo los vecinos no se ponen de acuerdo en la subcarpeta (Codex, Rules, FAQ…) pero sí en
+# el juego o la edición. Entonces el fichero va a "<juego>/_Por clasificar" en vez de esperar en
+# la Entrada. En la prueba con 1.500 libros: con 90% de acuerdo, un 20% más se coloca solo y
+# casi nunca en un juego equivocado (0,4%).
+
+POR_CLASIFICAR = "_Por clasificar"
+
+
+def es_nivel_de_juego(carpeta: str) -> bool:
+    """¿Es al menos un juego (no una carpeta que solo agrupa)? "RPG/Shadowrun" sí; "Wargames/Miniaturas" no."""
+    from .rutas import AGRUPA_EDITORIALES, EDITORIALES, FORMATOS_WARGAMES
+    p = carpeta.split("/")
+    if p[0] == "RPG":
+        if len(p) > 1 and p[1] == "D&D Third Party":
+            return len(p) >= 4  # RPG/D&D Third Party/<edición>/<editorial>
+        if len(p) > 1 and p[1] in AGRUPA_EDITORIALES:
+            return len(p) >= 3
+        return len(p) >= 2
+    if p[0] == "Wargames":
+        i = 2 if len(p) > 1 and p[1] in FORMATOS_WARGAMES else 1
+        if len(p) > i and p[i] in EDITORIALES:
+            i += 1  # Wargames/Miniaturas/Games Workshop/<juego>
+        return len(p) > i
+    if p[0] == "assets":
+        return len(p) >= 3
+    return len(p) >= 2
+
+
+def _madre(votos: dict[str, float], apoyos: dict[str, int], total: float) -> dict:
+    """La carpeta más profunda (de nivel de juego o más) que reúne la mayoría de los votos."""
+    suma: dict[str, float] = {}
+    cuenta: dict[str, int] = {}
+    for c, v in votos.items():
+        partes = c.split("/")
+        for i in range(1, len(partes)):  # solo antecesoras: la carpeta exacta ya la mira es_seguro
+            a = "/".join(partes[:i])
+            suma[a] = suma.get(a, 0) + v
+            cuenta[a] = cuenta.get(a, 0) + apoyos[c]
+    from .rutas import RE_EDICION, RE_EDICION_NUMERADA
+
+    def edicion(seg: str) -> bool:
+        return bool(RE_EDICION.match(seg) or RE_EDICION_NUMERADA.match(seg))
+
+    def con_edicion_si_hace_falta(a: str) -> bool:
+        # Si debajo hay ediciones ("Warhammer 40K/9e (2020)"), tiene que ser ya una edición:
+        # "D&D/_Por clasificar" mezclaría todas las ediciones.
+        if any(edicion(s) for s in a.split("/")):
+            return True
+        return not any(edicion(s) for c in votos if c.startswith(a + "/") for s in c[len(a) + 1:].split("/"))
+
+    candidatas = [a for a in suma if es_nivel_de_juego(a) and con_edicion_si_hace_falta(a)]
+    if not candidatas:
+        return {}
+    mejor = max(candidatas, key=lambda a: (round(suma[a] / total, 2) >= 0.9, a.count("/"), suma[a]))
+    return {"madre": mejor, "madre_confianza": round(suma[mejor] / total, 3), "madre_apoyos": cuenta[mejor]}
+
+
+def madre_segura(p: dict, umbral: float) -> str | None:
+    """Carpeta "<juego>/_Por clasificar" si el juego está claro (aunque la subcarpeta no), o None."""
+    if not umbral or not p.get("madre"):
+        return None
+    if p["madre_confianza"] >= umbral and p["madre_apoyos"] >= 3:
+        return f"{p['madre']}/{POR_CLASIFICAR}"
+    return None
 
 
 def es_seguro(p: dict, umbral: float) -> bool:

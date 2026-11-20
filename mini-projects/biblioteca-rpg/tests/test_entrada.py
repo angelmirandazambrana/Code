@@ -201,8 +201,8 @@ def test_papercraft_es_un_area():
     from biblioteca_rpg import config, rutas
     cfg = config.cargar()
     assert config.en_areas(cfg.areas, "assets/Papercraft/Fat Dragon Games/E Z Dungeons")
-    assert not config.en_areas(cfg.areas, "assets/Tokens/x")
-    assert not config.en_areas(cfg.areas, "assets/PapercraftX")
+    assert config.en_areas(cfg.areas, "assets/Tokens/x")
+    assert not config.en_areas(cfg.areas, "assetsX/y")
     d = rutas.analizar("assets/Papercraft/Fat Dragon Games/E Z Dungeons/Dungeon.pdf")
     assert (d.categoria, d.editorial) == ("Papercraft", "Fat Dragon Games")
 
@@ -287,3 +287,101 @@ def test_revision_por_grupos(entorno):
     assert (raiz / "RPG/Traveller/Classic/Cosa rara uno.pdf").is_file()
     assert (raiz / "RPG/Traveller/Classic/Cosa rara dos.pdf").is_file()
     assert _estado(con, "Cosa rara tres.pdf")["estado"] == "pendiente"
+
+
+def test_flip_mats_a_su_carpeta_de_assets():
+    from biblioteca_rpg import config, rutas
+    from biblioteca_rpg.entrada import PAIZO, destino_mapa
+    assert destino_mapa("Flip-Mat - City Gates .pdf") == PAIZO + "/Pathfinder/Flip Mats"
+    assert destino_mapa("Pathfinder_Flip_Map_Dungeon.pdf") == PAIZO + "/Pathfinder/Flip Mats"
+    assert destino_mapa("Flip Tiles - Forest Starter Set.pdf") == PAIZO + "/Pathfinder/Flip-Tiles"
+    assert destino_mapa("Starfinder Flip-Mat - Asteroid.pdf") == PAIZO + "/Starfinder/Flip-Mats"
+    assert destino_mapa("Flip-Mat - Basic Starfield.pdf", "Starfinder Society") == PAIZO + "/Starfinder/Flip-Mats"
+    assert destino_mapa("Flipmatic Adventures.pdf") is None
+    assert config.en_areas(config.cargar().areas, PAIZO + "/Pathfinder/Flip Mats")
+    assert rutas.analizar(PAIZO + "/Pathfinder/Flip Mats/PZO30011 - Forest Path.pdf").categoria == "Mapas"
+
+
+def test_packs_de_assets_sin_pdf(entorno):
+    import shutil as sh
+
+    from biblioteca_rpg import packs, rutas
+    cfg, con, raiz, entrada = entorno
+    autor = raiz / "assets/By Artist or Source/Heroic Maps"
+    for pack in ("Langstone Castle", "Langstone Ruins", "Redburn Battlefield", "Eyno Cantina"):
+        (autor / pack).mkdir(parents=True)
+        (autor / pack / "mapa.jpg").write_bytes(b"jpg")
+    (raiz / "assets/Tokens/Feyforged Tokens").mkdir(parents=True)
+    assert packs.indexar(con, cfg) == 6  # 4 packs + Heroic Maps + Feyforged Tokens
+    # Llega un pack de mapas (solo imágenes): va junto a los de su autor.
+    nuevo = raiz / "_Inbox/Heroic Maps - Langstone Keep"
+    nuevo.mkdir()
+    for n in ("Heroic Maps - Langstone Keep Day.jpg", "Heroic Maps - Langstone Keep Night.jpg"):
+        (nuevo / n).write_bytes(b"jpg")
+    entrada.pasada(con, cfg)
+    e = _estado(con, "Heroic Maps - Langstone Keep")
+    assert e["propuesta"] == "assets/By Artist or Source/Heroic Maps"
+    if e["estado"] == "movido":  # muy claro: ya está a su lado
+        assert e["ruta_actual"] == "assets/By Artist or Source/Heroic Maps/Heroic Maps - Langstone Keep"
+    else:
+        sh.rmtree(nuevo)
+    assert rutas.analizar("assets/By Artist or Source/Heroic Maps/Langstone/x.pdf").categoria == "Mapas"
+    assert rutas.analizar("assets/Tokens/Feyforged Tokens/x.pdf").categoria == "Tokens"
+    assert rutas.analizar("assets/By Artist or Source/Limithron/Music by Adventure Music/x.pdf").categoria == "Música"
+
+
+def test_nivel_de_juego_y_madre():
+    from biblioteca_rpg.clasificador import _madre, es_nivel_de_juego, madre_segura
+    assert es_nivel_de_juego("RPG/Shadowrun") and not es_nivel_de_juego("RPG")
+    assert not es_nivel_de_juego("Wargames/Miniaturas")
+    assert not es_nivel_de_juego("Wargames/Miniaturas/Games Workshop")
+    assert es_nivel_de_juego("Wargames/Miniaturas/Games Workshop/Warhammer 40K")
+    assert not es_nivel_de_juego("RPG/D&D Third Party/5e (2014)")
+    assert es_nivel_de_juego("RPG/D&D Third Party/5e (2014)/Kobold Press")
+    base = "Wargames/Miniaturas/Games Workshop/Warhammer 40K/9e (2020)"
+    votos = {f"{base}/Codex": 4.0, f"{base}/Rules": 3.0, f"{base}/FAQ": 2.5, "RPG/Otra": 0.5}
+    apoyos = {c: 3 for c in votos}
+    m = _madre(votos, apoyos, sum(votos.values()))
+    assert m["madre"] == base and m["madre_confianza"] == 0.95
+    assert madre_segura({**m}, 0.9) == base + "/_Por clasificar"
+    assert madre_segura({**m}, 0.97) is None
+
+
+def test_juego_claro_subcarpeta_no_va_a_por_clasificar(entorno, monkeypatch):
+    import importlib
+
+    from biblioteca_rpg import clasificador
+    cfg, con, raiz, entrada = entorno
+    _pdf(raiz / "_Inbox/Shadowrun Lockdown.pdf", "Lockdown")
+    sr = "RPG/Shadowrun/5e (Catalyst, 2013)"
+    falsa = {"propuesta": f"{sr}/Novelas", "confianza": 0.5, "apoyos": 2,
+             "alternativas": [[f"{sr}/Novelas", 50], [f"{sr}/Campañas", 45]],
+             "madre": sr, "madre_confianza": 0.95, "madre_apoyos": 5}
+    monkeypatch.setattr(entrada, "proponer", lambda *a, **k: dict(falsa))
+    monkeypatch.setattr(entrada, "con_segunda_opinion", lambda p, *a: p)
+    entrada.pasada(con, cfg)
+    e = _estado(con, "Shadowrun Lockdown.pdf")
+    assert e["estado"] == "movido" and e["ruta_actual"] == f"{sr}/_Por clasificar/Shadowrun Lockdown.pdf"
+    # Aparece en la pestaña "Por clasificar", agrupado por la subcarpeta más probable, y se coloca de una vez.
+    from biblioteca_rpg import web
+    importlib.reload(web)
+    cli = TestClient(web.app)
+    html = cli.get("/entrada?vista=por_clasificar").text
+    assert "Por clasificar (1)" in html and f"{sr}/Novelas" in html
+    cli.post("/entrada/lote", data={"destino": f"{sr}/Novelas", "ids": [e["id"]], "vista": "por_clasificar"})
+    entrada.pasada(con, cfg)
+    assert (raiz / f"{sr}/Novelas/Shadowrun Lockdown.pdf").is_file()
+    assert clasificador.POR_CLASIFICAR == "_Por clasificar"
+
+
+def test_por_clasificar_exige_edicion_si_el_juego_las_tiene():
+    from biblioteca_rpg.clasificador import _madre
+    votos = {"RPG/D&D/Adventures/5e (WotC, 2014)/A": 3.0, "RPG/D&D/Rulebooks/3e (WotC, 2000)/B": 3.0,
+             "RPG/D&D/Settings/Eberron": 3.0}
+    m = _madre(votos, {c: 3 for c in votos}, 9.0)
+    assert m.get("madre") != "RPG/D&D" or m["madre_confianza"] < 0.9  # D&D sin edición no vale
+    votos = {"W/Miniaturas/Games Workshop/Warhammer 40K/9e (2020)/Codex": 5.0,
+             "Wargames/Miniaturas/Games Workshop/Warhammer 40K/9e (2020)/Rules": 5.0}
+    votos = {k.replace("W/", "Wargames/", 1): v for k, v in votos.items()}
+    m = _madre(votos, {c: 3 for c in votos}, 10.0)
+    assert m["madre"] == "Wargames/Miniaturas/Games Workshop/Warhammer 40K/9e (2020)"

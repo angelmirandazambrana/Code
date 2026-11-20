@@ -4,15 +4,10 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# Lo que se cataloga (y a donde se puede mover lo que llega). Puede ser una subcarpeta:
-# de assets solo entra el papercraft y las miniaturas de papel.
+# Lo que se cataloga (y a donde se puede mover lo que llega). También vale una subcarpeta.
 AREAS = [
     "RPG", "Wargames", "Magazines", "Juegos de mesa",
-    "assets/Papercraft",
-    "assets/By Artist or Source/Stephen Joy/Paper Minis",
-    "assets/By Artist or Source/Paizo/Pathfinder/Paper Minis",
-    "assets/By Artist or Source/Paizo/Pathfinder/Pawns",
-    "assets/By Artist or Source/Paizo/Starfinder/Pawns",
+    "assets",  # mapas, tokens, papercraft, música… (del catálogo solo entran PDF y ebooks)
 ]
 
 

@@ -1,29 +1,10 @@
 {% extends "base.html" %}
 {% block titulo %}Entrada · Biblioteca{% endblock %}
 {% block contenido %}
-<section class="entrada">
-  <h1>Entrada</h1>
-  <p class="tenue">
-    Lo que llega a <code>{{ carpeta_entrada }}</code> se analiza solo en un par de minutos.
-    {% if auto %}Lo que está muy claro (≥ {{ (auto * 100)|round|int }}% y varios libros parecidos de acuerdo) se mueve sin preguntar y sale en <a href="/novedades">Novedades</a>;{% endif %}
-    lo dudoso espera aquí. Nunca se borra nada: lo descartado va a <code>{{ duplicados }}</code>.
-  </p>
-
-  <h2>Por revisar <span class="n">{{ pendientes|length }}</span></h2>
-  {% if pendientes %}
-    <nav class="vistas" aria-label="Cómo revisar">
-      <a href="/entrada"{% if not por_grupos %} aria-current="page"{% endif %}>Uno a uno</a>
-      <a href="/entrada?vista=grupos"{% if por_grupos %} aria-current="page"{% endif %}>Por grupos</a>
-    </nav>
-  {% endif %}
-  {% if not pendientes %}<p class="vacio">Nada pendiente.</p>{% endif %}
-
-  {% if por_grupos %}
-    <p class="tenue">Los pendientes que proponen la misma carpeta, juntos: {{ n_agrupados }} en {{ grupos|length }} grupos.
-      Vienen marcados los que tienen un 50% de confianza o más: revisa, marca o desmarca y mueve el resto de una vez. Los que quedan solos se revisan <a href="/entrada">uno a uno</a>.</p>
-    {% for g in grupos %}
+{% macro grupo_form(g, vista) %}
       <form class="grupo" method="post" action="/entrada/lote">
         <input type="hidden" name="destino" value="{{ g.carpeta }}">
+        <input type="hidden" name="vista" value="{{ vista }}">
         <div class="grupo-cabecera">
           <h3><span class="ruta">{{ g.carpeta }}</span></h3>
           <span class="tenue">{{ g.entradas|length }} ficheros · confianza media {{ g.confianza }}%</span>
@@ -42,10 +23,48 @@
           {% endfor %}
         </ul>
       </form>
+{% endmacro %}
+<section class="entrada">
+  <h1>Entrada</h1>
+  <p class="tenue">
+    Lo que llega a <code>{{ carpeta_entrada }}</code> se analiza solo en un par de minutos.
+    {% if auto %}Lo que está muy claro (≥ {{ (auto * 100)|round|int }}% y varios libros parecidos de acuerdo) se mueve sin preguntar y sale en <a href="/novedades">Novedades</a>;{% endif %}
+    lo dudoso espera aquí. Nunca se borra nada: lo descartado va a <code>{{ duplicados }}</code>.
+  </p>
+
+  <h2>Por revisar <span class="n">{{ pendientes|length }}</span></h2>
+  {% if pendientes or n_por_clasificar %}
+    <nav class="vistas" aria-label="Cómo revisar">
+      <a href="/entrada"{% if not vista %} aria-current="page"{% endif %}>Uno a uno</a>
+      <a href="/entrada?vista=grupos"{% if por_grupos %} aria-current="page"{% endif %}>Por grupos</a>
+      {% if n_por_clasificar %}<a href="/entrada?vista=por_clasificar"{% if vista == 'por_clasificar' %} aria-current="page"{% endif %}>Por clasificar ({{ n_por_clasificar }})</a>{% endif %}
+    </nav>
+  {% endif %}
+  {% if not pendientes %}<p class="vacio">Nada pendiente.</p>{% endif %}
+
+  {% if vista == 'por_clasificar' %}
+    <p class="tenue">Ya están en su juego, en la carpeta <code>{{ por_clasificar }}</code>, porque no estaba clara la subcarpeta.
+      Aquí se juntan por la subcarpeta más probable para colocarlos de una vez. No hay prisa: en su juego ya se encuentran.</p>
+    {% for j in juegos %}
+      <h3 class="juego"><span class="ruta">{{ j.juego }}</span> <span class="n">{{ j.n }}</span></h3>
+      {% for g in j.grupos %}{{ grupo_form(g, 'por_clasificar') }}{% endfor %}
+      {% if j.sueltos %}
+        <ul class="lista-simple">
+          {% for e in j.sueltos %}<li>{{ e.nombre }} <span class="tenue">· sin subcarpeta propuesta: usa «Corregir» en Movidos hace poco o muévelo a mano</span></li>{% endfor %}
+        </ul>
+      {% endif %}
     {% endfor %}
   {% endif %}
 
-  {% for e in pendientes if not por_grupos %}
+  {% if por_grupos %}
+    <p class="tenue">Los pendientes que proponen la misma carpeta, juntos: {{ n_agrupados }} en {{ grupos|length }} grupos.
+      Vienen marcados los que tienen un 50% de confianza o más: revisa, marca o desmarca y mueve el resto de una vez. Los que quedan solos se revisan <a href="/entrada">uno a uno</a>.</p>
+    {% for g in grupos %}
+      {{ grupo_form(g, 'grupos') }}
+    {% endfor %}
+  {% endif %}
+
+  {% for e in pendientes if not vista %}
     <article class="lote{% if e.estado == 'error' %} con-error{% endif %}">
       <a class="lote-portada" href="/entrada/{{ e.id }}/pdf" target="_blank" rel="noopener"><img src="/entrada/{{ e.id }}/portada.jpg" alt="" loading="lazy"></a>
       <div class="lote-datos">

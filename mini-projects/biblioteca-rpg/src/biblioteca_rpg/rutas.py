@@ -132,6 +132,29 @@ def _parentesis(texto: str | None) -> tuple[str | None, int | None]:
     return editorial, anio
 
 
+TIPOS_ASSETS = {
+    "Papercraft": "Papercraft", "Maps and Tiles": "Mapas", "Map Assets": "Mapas", "Dungeondraft": "Mapas",
+    "Wonderdraft": "Mapas", "Tokens": "Tokens", "One Page Dungeons Contest": "Aventuras de una página",
+}
+RE_TIPO_ASSET = [
+    (re.compile(r"paper ?mini|pawns?\b|papercraft|paper ?model", re.I), "Papercraft"),
+    (re.compile(r"flip|maps?\b|tiles?\b|battle ?mat|dungeon ?tiles|geomorph", re.I), "Mapas"),
+    (re.compile(r"tokens?\b", re.I), "Tokens"),
+    (re.compile(r"music|audio|ambien", re.I), "Música"),
+]
+
+
+def _tipo_asset(carpetas: list[str]) -> str:
+    """Qué es lo de assets: por su carpeta de primer nivel o, en By Artist or Source, por la ruta."""
+    if len(carpetas) > 1 and carpetas[1] in TIPOS_ASSETS:
+        return TIPOS_ASSETS[carpetas[1]]
+    ruta = "/".join(carpetas[1:])
+    for patron, tipo in RE_TIPO_ASSET:
+        if patron.search(ruta):
+            return tipo
+    return "Recursos"
+
+
 def analizar(ruta: str) -> Datos:
     """ruta: relativa a la raíz, con '/' o '\\'."""
     segs = [s for s in re.split(r"[\\/]", ruta) if s]
@@ -142,13 +165,14 @@ def analizar(ruta: str) -> Datos:
         return d
 
     if carpetas[0] == "assets":
-        # Papercraft y miniaturas de papel: assets/Papercraft/<editorial>/... o
-        # assets/By Artist or Source/<editorial>/.../Paper Minis
-        d.categoria, d.tipo = "Papercraft", "Papercraft"
+        # Recursos de juego: assets/<tipo>/<autor o editorial>/<pack>/...
+        d.categoria = d.tipo = _tipo_asset(carpetas)
         if len(carpetas) > 2:
-            d.editorial = carpetas[2]
-            if carpetas[1] != "Papercraft" and len(carpetas) > 3:
-                d.sistema = limpiar(carpetas[3])
+            # Maps and Tiles/BattleMaps/<autor>: el autor va un nivel más abajo.
+            i = 3 if carpetas[1] == "Maps and Tiles" and len(carpetas) > 3 else 2
+            d.editorial = carpetas[i]
+            if len(carpetas) > i + 1:
+                d.sistema = limpiar(carpetas[i + 1])
         return d
     d.categoria = CATEGORIAS.get(carpetas[0], limpiar(carpetas[0]))
     resto = carpetas[1:]

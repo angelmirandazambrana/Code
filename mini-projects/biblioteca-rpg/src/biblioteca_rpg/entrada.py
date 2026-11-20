@@ -23,8 +23,17 @@ import time
 from pathlib import Path
 
 from . import config as config_mod
-from . import texto_pdf
-from .clasificador import VECINOS, Bayes, con_segunda_opinion, es_seguro, palabras, proponer, rasgos
+from . import packs, texto_pdf
+from .clasificador import (
+    VECINOS,
+    Bayes,
+    con_segunda_opinion,
+    es_seguro,
+    madre_segura,
+    palabras,
+    proponer,
+    rasgos,
+)
 from .db import conectar
 from .enriquecer import pasada_pdf
 from .indexador import _procesar_pdf, en_paralelo, generar_portadas, sincronizar
@@ -93,6 +102,42 @@ def destino_novela(nombre: str, canal: str) -> str | None:
             if texto and patron.search(texto):
                 return carpeta
     return None
+
+
+# Mapas de Paizo: van a assets, a la carpeta de su tipo (el nombre lo dice siempre).
+PAIZO = "assets/By Artist or Source/Paizo"
+REGLAS_MAPAS = [
+    (re.compile(r"starfinder.*flip|flip.*starfinder", re.I), PAIZO + "/Starfinder/Flip-Mats"),
+    (re.compile(r"flip[\s_-]*tiles?", re.I), PAIZO + "/Pathfinder/Flip-Tiles"),
+    (re.compile(r"flip[\s_-]*ma[pt]s?(?![a-z])", re.I), PAIZO + "/Pathfinder/Flip Mats"),
+]
+
+
+def destino_mapa(nombre: str, canal: str = "") -> str | None:
+    """Carpeta de mapas para un Flip-Mat / Flip-Tiles, por su nombre; None si no es uno."""
+    for patron, carpeta in REGLAS_MAPAS:
+        if patron.search(nombre):
+            # "Flip-Mat" a secas: si llegó de un canal de Starfinder, es de Starfinder.
+            if carpeta.endswith("/Pathfinder/Flip Mats") and re.search(r"starfinder", canal, re.I):
+                return PAIZO + "/Starfinder/Flip-Mats"
+            return carpeta
+    return None
+
+
+def _nombres_dentro(ruta: Path, n: int = 10) -> list[str]:
+    """Nombres (sin extensión) de unos pocos ficheros y carpetas de dentro, para reconocer un pack."""
+    if not ruta.is_dir():
+        return []
+    res = []
+    try:
+        for p in sorted(ruta.iterdir())[:200]:
+            if not p.name.startswith("."):
+                res.append(p.stem)
+            if len(res) >= n:
+                break
+    except OSError:
+        pass
+    return res
 
 
 def ruta_portada_entrada(cfg, entrada_id: int) -> Path:
@@ -361,9 +406,13 @@ def analizar(con, cfg) -> int:
         canal = canal_telegram(con, f["nombre"])  # "Warhammer 40000 9°Edicion": dice de qué juego es
         consulta = " ".join([f["nombre"], r.get("pdf_titulo") or "", origen_texto[:300], canal,
                              *[p.stem for p in i["pdfs"][:10] if p.name != f["nombre"]]])
-        novela = None if f["es_carpeta"] else destino_novela(f["nombre"], canal)
+        novela = destino_mapa(f["nombre"], canal) or (None if f["es_carpeta"] else destino_novela(f["nombre"], canal))
         if novela:
             p = {"propuesta": novela, "confianza": 1.0, "apoyos": VECINOS, "alternativas": [[novela, 100]]}
+        elif not i["pdfs"] and Path(f["nombre"]).suffix.lower() not in EBOOKS:
+            # Sin PDF (pack de mapas, tokens, música…): se compara con las carpetas de assets,
+            # usando también los nombres de lo que trae dentro.
+            p = packs.proponer(con, " ".join([consulta, *_nombres_dentro(cfg.raiz / f["ruta_actual"])]))
         else:
             p = proponer(con, consulta, datos.get("editorial"))
             p = con_segunda_opinion(p, bayes, rasgos(consulta, datos.get("editorial"), r.get("pdf_titulo")))
@@ -374,6 +423,9 @@ def analizar(con, cfg) -> int:
             estado, auto, destino = ("aprobado", 1, DUPLICADOS) if cfg.auto else ("pendiente", 0, DUPLICADOS)
         elif es_seguro(p, cfg.auto):
             estado, auto = "aprobado", 1
+        elif madre_segura(p, cfg.auto):
+            # Se sabe el juego pero no la subcarpeta: a "<juego>/_Por clasificar".
+            estado, auto, destino = "aprobado", 1, madre_segura(p, cfg.auto)
         else:
             estado, auto = "pendiente", 0
         with con:
@@ -503,6 +555,10 @@ def ejecutar_aprobados(con, cfg, log: Registro) -> int:
 
 def actualizar_catalogo(con, cfg, carpetas: list[str]) -> None:
     r = sincronizar(con, cfg, carpetas)
+    # Un pack que entra en assets (o sale): se rehace el índice de su carpeta madre.
+    madres = sorted({c.rsplit("/", 1)[0] for c in carpetas if c.startswith(packs.RAIZ + "/") and "/" in c})
+    if madres:
+        packs.indexar(con, cfg, madres)
     print(f"  catálogo: {r['nuevos']} nuevos, {r['borrados']} quitados", flush=True)
     existentes = [c for c in carpetas if (cfg.raiz / c).is_dir()]
     if existentes:

@@ -4,6 +4,7 @@
 """
 
 import json
+import sqlite3
 import time
 from pathlib import Path
 from typing import Annotated
@@ -15,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from . import config as config_mod
+from .clasificador import POR_CLASIFICAR
 from .consultas import FACETAS, NO, ORDENES, SIN_VALOR, buscar, consulta_fts, facetas, subcarpetas
 from .db import conectar
 from .enriquecer import aplicar
@@ -264,6 +266,27 @@ def agrupar_pendientes(pendientes: list[dict], minimo: int = 2) -> list[dict]:
     return sorted(grupos, key=lambda g: (-len(g["entradas"]), -g["confianza"], g["carpeta"]))
 
 
+def agrupar_por_clasificar(entradas: list[dict]) -> list[dict]:
+    """Lo que está en "<juego>/_Por clasificar", por juego y, dentro, por la subcarpeta más probable.
+
+    [{"juego", "n", "grupos": [{"carpeta", "entradas", "confianza"}], "sueltos": [entrada]}]
+    """
+    por_juego: dict[str, list[dict]] = {}
+    for e in entradas:
+        juego = e["ruta_actual"].split(f"/{POR_CLASIFICAR}/", 1)[0]
+        # Las alternativas que caen dentro del juego son las candidatas a subcarpeta.
+        dentro = [[c, pct] for c, pct in e["alternativas"] if c.startswith(juego + "/")]
+        e["propuesta"], e["confianza"] = (dentro[0][0], dentro[0][1] / 100) if dentro else (None, 0)
+        e["estado"] = "pendiente"  # para agrupar_pendientes
+        por_juego.setdefault(juego, []).append(e)
+    res = []
+    for juego, es in sorted(por_juego.items(), key=lambda x: -len(x[1])):
+        grupos = agrupar_pendientes(es, minimo=1)
+        res.append({"juego": juego, "n": len(es), "grupos": grupos,
+                    "sueltos": [e for e in es if not e["propuesta"]]})
+    return res
+
+
 @app.get("/entrada", response_class=HTMLResponse)
 def entrada(request: Request, vista: str = ""):
     con = _con()
@@ -279,8 +302,14 @@ def entrada(request: Request, vista: str = ""):
     pendientes = lista("SELECT * FROM entrada WHERE estado IN ('pendiente', 'error') ORDER BY llegado_en, id")
     por_grupos = vista == "grupos"
     grupos = agrupar_pendientes(pendientes) if por_grupos else []
+    marca = f"%/{POR_CLASIFICAR}/%"
+    n_por_clasificar = con.execute("SELECT COUNT(*) FROM entrada WHERE estado='movido' AND ruta_actual LIKE ?",
+                                   (marca,)).fetchone()[0]
+    juegos = agrupar_por_clasificar(lista("SELECT * FROM entrada WHERE estado='movido' AND ruta_actual LIKE ? "
+                                          "ORDER BY ruta_actual", marca)) if vista == "por_clasificar" else []
     return plantillas.TemplateResponse(request, "entrada.html", {
-        "pendientes": pendientes, "grupos": grupos, "por_grupos": por_grupos,
+        "pendientes": pendientes, "grupos": grupos, "por_grupos": por_grupos, "vista": vista,
+        "n_por_clasificar": n_por_clasificar, "juegos": juegos, "por_clasificar": POR_CLASIFICAR,
         "n_agrupados": sum(len(g["entradas"]) for g in grupos),
         "en_cola": lista("SELECT * FROM entrada WHERE estado IN ('nuevo', 'aprobado') ORDER BY id"),
         "recientes": lista("SELECT * FROM entrada WHERE estado IN ('movido', 'descartado') "
@@ -290,20 +319,24 @@ def entrada(request: Request, vista: str = ""):
 
 
 @app.post("/entrada/lote")
-def decidir_lote(destino: Annotated[str, Form()], ids: Annotated[list[int] | None, Form()] = None):
+def decidir_lote(destino: Annotated[str, Form()], ids: Annotated[list[int] | None, Form()] = None,
+                 vista: Annotated[str, Form()] = "grupos"):
     """Mueve de golpe los pendientes marcados de un grupo a su carpeta (la ejecuta el clasificador)."""
     valido = destino_valido(cfg, destino)
     if not valido:
         raise HTTPException(400, f"Carpeta no válida: «{destino}»")
+    vista = vista if vista in ("grupos", "por_clasificar") else "grupos"
     if not ids:
-        return RedirectResponse("/entrada?vista=grupos", status_code=303)
+        return RedirectResponse(f"/entrada?vista={vista}", status_code=303)
     con = _con()
     with con:
         # Solo los que siguen pendientes: lo que ya está en cola o movido no se toca.
+        # Solo los pendientes y lo que espera en una carpeta "_Por clasificar".
         con.execute(f"UPDATE entrada SET estado='aprobado', destino=?, nuevo_nombre=NULL, auto=0, decidido_en=?, "
-                    f"nota=NULL WHERE estado='pendiente' AND id IN ({','.join('?' * len(ids))})",
-                    (valido, int(time.time()), *ids))
-    return RedirectResponse("/entrada?vista=grupos", status_code=303)
+                    f"nota=NULL WHERE (estado='pendiente' OR (estado='movido' AND ruta_actual LIKE ?)) "
+                    f"AND id IN ({','.join('?' * len(ids))})",
+                    (valido, int(time.time()), f"%/{POR_CLASIFICAR}/%", *ids))
+    return RedirectResponse(f"/entrada?vista={vista}", status_code=303)
 
 
 @app.post("/entrada/{entrada_id}")
@@ -376,6 +409,12 @@ def _indice_carpetas(con) -> list[tuple[str, str, str, int]]:
             for i in range(1, len(partes) + 1):
                 c = "/".join(partes[:i])
                 totales[c] = totales.get(c, 0) + f["n"]
+        # Las carpetas de assets sin PDF (packs de mapas, tokens, música…) también son destinos.
+        try:
+            for (ruta,) in con.execute("SELECT ruta FROM packs WHERE length(ruta) - length(replace(ruta, '/', '')) <= 3"):
+                totales.setdefault(ruta, 0)
+        except sqlite3.OperationalError:
+            pass  # aún no hay índice de packs
         return [(c, normalizar(c), normalizar(c.rsplit("/", 1)[-1]), n)
                 for c, n in totales.items() if c and "/_" not in "/" + c]
     return _cacheado(con, ("carpetas",), calcular)
