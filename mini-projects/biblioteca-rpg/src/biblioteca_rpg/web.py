@@ -312,19 +312,80 @@ def _alternativas_grupo(carpeta: str, entradas: list[dict], n: int = 5) -> list[
     return [carpeta, *otras[: n - 1]]
 
 
-def agrupar_pendientes(pendientes: list[dict], minimo: int = 2) -> list[dict]:
+# Palabras de una ruta que no dicen de qué juego es (tipos, áreas, ediciones…).
+GENERICAS_RUTA = set("""
+rpg wargames assets juegos mesa other publishers por clasificar core rules supplements settings adventures
+organized play game aids fan homebrew fiction background misc army books scenarios campaigns errata faq
+any edition rulebook rulebooks reglas
+""".split())  # noqa: SIM905
+
+
+def _distintivas(texto: str) -> set[str]:
+    from .clasificador import palabras
+    return {p for p in palabras(texto) if p not in GENERICAS_RUTA and len(p) > 2
+            and not re.fullmatch(r"\d+e|v\d+|\d+", p)}
+
+
+def encaja(e: dict, carpeta: str) -> bool:
+    """¿Comparte el fichero alguna palabra distintiva con la carpeta propuesta? «battlerune…» no
+    encaja en «Five parsecs from home» aunque los dos digan «rulebook» o «digital»."""
+    return bool(_distintivas(f"{e.get('nombre') or ''} {e.get('pdf_titulo') or ''}")
+                & _distintivas(carpeta.replace("/", " ")))
+
+
+def agrupar_pendientes(pendientes: list[dict], minimo: int = 2, comprobar: bool = True) -> list[dict]:
     """Los pendientes con la misma carpeta propuesta, de los grupos más grandes a los más pequeños.
 
     Para decidir de golpe: «estos 15 van a Kobold Press». Solo grupos de `minimo` o más.
+    Lo que no encaja con su propuesta (ninguna palabra distintiva en común) no se mezcla con los
+    que sí: se agrupa con los que empiezan por la misma palabra («battlerune», 7 ficheros), sin
+    carpeta marcada, para darles una de una vez.
     """
     por: dict[str, list[dict]] = {}
+    sin_carpeta: dict[str, list[dict]] = {}
     for e in pendientes:
-        if e["estado"] == "pendiente" and e.get("propuesta"):
+        if e["estado"] != "pendiente":
+            continue
+        if e.get("propuesta") and (not comprobar or encaja(e, e["propuesta"])):
             por.setdefault(e["propuesta"], []).append(e)
-    grupos = [{"carpeta": c, "entradas": es, "confianza": round(sum(e["confianza"] or 0 for e in es) / len(es) * 100),
+        elif comprobar:
+            from .clasificador import palabras
+            distintas = _distintivas(e.get("nombre") or "")
+            primera = next((p for p in palabras(e.get("nombre") or "") if p in distintas), None)
+            if primera:
+                sin_carpeta.setdefault(primera, []).append(e)
+    grupos = [{"carpeta": c, "clave": c, "entradas": es,
+               "confianza": round(sum(e["confianza"] or 0 for e in es) / len(es) * 100),
                "alternativas": _alternativas_grupo(c, es)}
               for c, es in por.items() if len(es) >= minimo]
-    return sorted(grupos, key=lambda g: (-len(g["entradas"]), -g["confianza"], g["carpeta"]))
+    grupos += [{"carpeta": None, "clave": f"sin:{p}", "palabra": p, "entradas": es,
+                "confianza": round(sum(e["confianza"] or 0 for e in es) / len(es) * 100),
+                "alternativas": _alternativas_grupo(None, es)[1:]}
+               for p, es in sin_carpeta.items() if len(es) >= max(minimo, 2)]
+    return sorted(grupos, key=lambda g: (g["carpeta"] is None, -len(g["entradas"]), -g["confianza"],
+                                         g["carpeta"] or g["palabra"]))
+
+
+TIPOS_CARPETA = {
+    "Core Rules", "Supplements", "Settings", "Adventures", "Organized Play", "Game Aids", "Fan & Homebrew",
+    "Fiction", "Background", "Misc", "Rules", "Army Books", "Scenarios & Campaigns", "Errata & FAQ",
+}
+
+
+def carpetas_de_tipo(juego: str) -> list[str]:
+    """Las carpetas de tipo que existen en el juego (o en sus ediciones): 'RPG/X/5e/Adventures'."""
+    base = cfg.raiz / juego
+    if not base.is_dir():
+        return []
+    res = []
+    for d in sorted(base.iterdir()):
+        if not d.is_dir():
+            continue
+        if d.name in TIPOS_CARPETA:
+            res.append(f"{juego}/{d.name}")
+        elif not d.name.startswith("_"):  # una edición o línea: sus tipos
+            res += [f"{juego}/{d.name}/{s.name}" for s in sorted(d.iterdir()) if s.is_dir() and s.name in TIPOS_CARPETA]
+    return res
 
 
 def agrupar_por_clasificar(entradas: list[dict]) -> list[dict]:
@@ -333,18 +394,27 @@ def agrupar_por_clasificar(entradas: list[dict]) -> list[dict]:
     [{"juego", "n", "grupos": [{"carpeta", "entradas", "confianza"}], "sueltos": [entrada]}]
     """
     por_juego: dict[str, list[dict]] = {}
+    tipos_de: dict[str, list[str]] = {}
     for e in entradas:
+        if not (cfg.raiz / e["ruta_actual"]).exists():
+            continue  # se movió después (reorganización): ya no está aquí
         juego = e["ruta_actual"].split(f"/{POR_CLASIFICAR}/", 1)[0]
-        # Las alternativas que caen dentro del juego son las candidatas a subcarpeta.
-        dentro = [[c, pct] for c, pct in e["alternativas"] if c.startswith(juego + "/")]
-        e["propuesta"], e["confianza"] = (dentro[0][0], (dentro[0][1] or 60) / 100) if dentro else (None, 0)
+        if juego not in tipos_de:
+            tipos_de[juego] = carpetas_de_tipo(juego)
+        # Candidatas: las carpetas de tipo que hay en el juego, ordenadas por lo que sugirió el
+        # clasificador (una alternativa dentro de "Adventures/…" cuenta para "Adventures").
+        puntos = {c: sum((pct or 60) for a, pct in e["alternativas"] if a == c or a.startswith(c + "/"))
+                  for c in tipos_de[juego]}
+        mejor = max(puntos, key=puntos.get) if puntos and max(puntos.values()) > 0 else None
+        e["propuesta"], e["confianza"] = (mejor, min(puntos[mejor], 100) / 100) if mejor else (None, 0)
+        e["alternativas"] = [[c, p] for c, p in sorted(puntos.items(), key=lambda x: -x[1])]
         e["estado"] = "pendiente"  # para agrupar_pendientes
         por_juego.setdefault(juego, []).append(e)
     res = []
     for juego, es in sorted(por_juego.items(), key=lambda x: -len(x[1])):
-        grupos = agrupar_pendientes(es, minimo=1)
-        for g in grupos:  # solo subcarpetas del juego (o el propio juego)
-            g["alternativas"] = [c for c in g["alternativas"] if c.startswith(juego + "/")]
+        grupos = agrupar_pendientes(es, minimo=1, comprobar=False)
+        for g in grupos:  # solo carpetas de tipo del juego
+            g["alternativas"] = [c for c in g["alternativas"] if c in tipos_de[juego]]
         res.append({"juego": juego, "n": len(es), "grupos": grupos,
                     "sueltos": [e for e in es if not e["propuesta"]]})
     return res

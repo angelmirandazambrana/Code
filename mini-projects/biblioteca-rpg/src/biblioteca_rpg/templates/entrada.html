@@ -2,22 +2,28 @@
 {% block titulo %}Entrada · Biblioteca{% endblock %}
 {% block contenido %}
 {% macro grupo_form(g, vista) %}
-  <details class="grupo" open data-clave="{{ vista }}:{{ g.carpeta }}">
+  <details class="grupo" open data-clave="{{ vista }}:{{ g.clave or g.carpeta }}">
     <summary class="grupo-cabecera">
+      {% if g.carpeta %}
       <h3><span class="ruta">{{ g.carpeta }}</span></h3>
       <span class="tenue">{{ g.entradas|length }} ficheros · confianza media {{ g.confianza }}%</span>
+      {% else %}
+      <h3>Sin carpeta clara: «{{ g.palabra }}»</h3>
+      <span class="tenue">{{ g.entradas|length }} ficheros que empiezan igual y no se parecen a nada de la biblioteca</span>
+      {% endif %}
     </summary>
     <form method="post" action="/entrada/lote">
       <input type="hidden" name="vista" value="{{ vista }}">
       <fieldset class="grupo-destino">
         <legend>¿A qué carpeta van los marcados?</legend>
         {% for carpeta in g.alternativas %}
-          <label class="opcion"><input type="radio" name="destino" value="{{ carpeta }}" {% if loop.first %}checked{% endif %}>
+          <label class="opcion"><input type="radio" name="destino" value="{{ carpeta }}" {% if loop.first and g.carpeta %}checked{% endif %}>
             <span class="ruta">{{ carpeta }}</span></label>
         {% endfor %}
-        <label class="opcion otra"><input type="radio" name="destino" value="__otra">
+        <label class="opcion otra"><input type="radio" name="destino" value="__otra" {% if not g.carpeta %}checked{% endif %}>
           <span class="buscador-carpeta">
-            <input type="text" name="destino_otra" placeholder="Otra carpeta: escribe palabras o una nueva (RPG/Gimmick-zero)" data-buscar-carpeta autocomplete="off">
+            <input type="text" name="destino_otra" placeholder="Otra carpeta: escribe palabras o una nueva (RPG/Gimmick-zero)" data-buscar-carpeta autocomplete="off"
+                   {% if not g.carpeta %}value="{{ g.palabra }}"{% endif %}>
             <span class="sugerencias" role="listbox" hidden></span>
           </span>
         </label>

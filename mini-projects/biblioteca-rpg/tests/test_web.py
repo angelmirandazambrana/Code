@@ -109,3 +109,20 @@ def test_busqueda_en_bgg_por_el_juego():
     assert j("Wargames/Avalon Hill/ASL/Rules", "ASL Rulebook 2nd ed") == "ASL"
     assert j("Wargames/_Reference/Jane's", "Jane's Fighting Ships - 1990") == "Jane's Fighting Ships"
     assert j("Juegos de mesa/_Sueltos", "Catan - Rules") == "Catan"
+
+
+def test_grupos_no_mezclan_lo_que_no_encaja():
+    from biblioteca_rpg.web import agrupar_pendientes
+    five = "Wargames/Other Publishers/Five/Five parsecs from home/3E/Game Aids"
+
+    def e(i, nombre, propuesta=five, conf=0.2):
+        return {"id": i, "nombre": nombre, "pdf_titulo": None, "estado": "pendiente", "propuesta": propuesta,
+                "confianza": conf, "alternativas": [[propuesta, 20]]}
+    pend = [e(1, "Five Parsecs from Alderaan v1.1.pdf"), e(2, "MUH084V032_Five_Parsecs_From_Home_Compendium.pdf"),
+            e(3, "battlerune-champion-builder-beta-v1-0-digital-us-letter.pdf"),
+            e(4, "battlerune_star_vault_unit_rulebook_alpha_v4_7_digital_us_letter.pdf"),
+            e(5, "battlerune-scifi-rulebook-alpha-v4-9.pdf", propuesta="RPG/Savage Worlds/Core Rules")]
+    g = agrupar_pendientes(pend)
+    assert [x["carpeta"] for x in g] == [five, None]
+    assert {x["id"] for x in g[0]["entradas"]} == {1, 2}
+    assert g[1]["palabra"] == "battlerune" and {x["id"] for x in g[1]["entradas"]} == {3, 4, 5}

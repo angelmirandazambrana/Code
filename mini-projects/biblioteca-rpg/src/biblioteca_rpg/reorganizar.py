@@ -332,6 +332,9 @@ def _mover(cfg, con, clase: str, origen: str, destino: str) -> str:
                         (nuevo, *[getattr(datos, c) for c in CAMPOS_RUTA], origen))
         # Lo que pasó por la Entrada sigue sabiendo dónde está (para «Corregir»).
         con.execute("UPDATE entrada SET ruta_actual=? WHERE ruta_actual=?", (nuevo, origen))
+        if clase == "carpeta":  # lo que llegó dentro de esa carpeta también cambia de sitio
+            con.execute("UPDATE entrada SET ruta_actual = ? || substr(ruta_actual, ?) "
+                        "WHERE substr(ruta_actual, 1, ?) = ?", (nuevo, len(origen) + 1, len(origen) + 1, origen + "/"))
     return nuevo
 
 

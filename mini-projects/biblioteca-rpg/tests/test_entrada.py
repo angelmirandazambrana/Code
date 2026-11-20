@@ -358,8 +358,10 @@ def test_juego_claro_subcarpeta_no_va_a_por_clasificar(entorno, monkeypatch):
     cfg, con, raiz, entrada = entorno
     _pdf(raiz / "_Inbox/Shadowrun Lockdown.pdf", "Lockdown")
     sr = "RPG/Shadowrun/5e (Catalyst, 2013)"
-    falsa = {"propuesta": f"{sr}/Novelas", "confianza": 0.5, "apoyos": 2,
-             "alternativas": [[f"{sr}/Novelas", 50], [f"{sr}/Campañas", 45]],
+    for t in ("Fiction", "Adventures"):
+        (raiz / sr / t).mkdir(parents=True)
+    falsa = {"propuesta": f"{sr}/Fiction/Novelas viejas", "confianza": 0.5, "apoyos": 2,
+             "alternativas": [[f"{sr}/Fiction/Novelas viejas", 50], [f"{sr}/Campañas", 45]],
              "madre": sr, "madre_confianza": 0.95, "madre_apoyos": 5}
     monkeypatch.setattr(entrada, "proponer", lambda *a, **k: dict(falsa))
     monkeypatch.setattr(entrada, "con_segunda_opinion", lambda p, *a: p)
@@ -371,10 +373,12 @@ def test_juego_claro_subcarpeta_no_va_a_por_clasificar(entorno, monkeypatch):
     importlib.reload(web)
     cli = TestClient(web.app)
     html = cli.get("/entrada?vista=por_clasificar").text
-    assert "Por clasificar (1)" in html and f"{sr}/Novelas" in html
-    cli.post("/entrada/lote", data={"destino": f"{sr}/Novelas", "ids": [e["id"]], "vista": "por_clasificar"})
+    # Las candidatas son las carpetas de tipo que existen en el juego, no subcarpetas sueltas.
+    assert "Por clasificar (1)" in html and f"{sr}/Fiction" in html and f"{sr}/Adventures" in html
+    assert "Novelas viejas" not in html and "Campañas" not in html
+    cli.post("/entrada/lote", data={"destino": f"{sr}/Fiction", "ids": [e["id"]], "vista": "por_clasificar"})
     entrada.pasada(con, cfg)
-    assert (raiz / f"{sr}/Novelas/Shadowrun Lockdown.pdf").is_file()
+    assert (raiz / f"{sr}/Fiction/Shadowrun Lockdown.pdf").is_file()
     assert clasificador.POR_CLASIFICAR == "_Por clasificar"
 
 
