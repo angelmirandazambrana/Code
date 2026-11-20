@@ -252,6 +252,16 @@ def decidir(doc_id: int, accion: str, ref: int | None = None, volver: str = "/re
 
 # --- Entrada (_Inbox) y novedades ---------------------------------------------------
 
+def _alternativas_grupo(carpeta: str, entradas: list[dict], n: int = 5) -> list[str]:
+    """Carpetas para elegir en un grupo: la propuesta y las que más se repiten entre sus alternativas."""
+    suma: dict[str, float] = {}
+    for e in entradas:
+        for c, pct in e.get("alternativas") or []:
+            suma[c] = suma.get(c, 0) + pct
+    otras = [c for c, _ in sorted(suma.items(), key=lambda x: -x[1]) if c != carpeta]
+    return [carpeta, *otras[: n - 1]]
+
+
 def agrupar_pendientes(pendientes: list[dict], minimo: int = 2) -> list[dict]:
     """Los pendientes con la misma carpeta propuesta, de los grupos más grandes a los más pequeños.
 
@@ -261,7 +271,8 @@ def agrupar_pendientes(pendientes: list[dict], minimo: int = 2) -> list[dict]:
     for e in pendientes:
         if e["estado"] == "pendiente" and e.get("propuesta"):
             por.setdefault(e["propuesta"], []).append(e)
-    grupos = [{"carpeta": c, "entradas": es, "confianza": round(sum(e["confianza"] or 0 for e in es) / len(es) * 100)}
+    grupos = [{"carpeta": c, "entradas": es, "confianza": round(sum(e["confianza"] or 0 for e in es) / len(es) * 100),
+               "alternativas": _alternativas_grupo(c, es)}
               for c, es in por.items() if len(es) >= minimo]
     return sorted(grupos, key=lambda g: (-len(g["entradas"]), -g["confianza"], g["carpeta"]))
 
@@ -282,6 +293,8 @@ def agrupar_por_clasificar(entradas: list[dict]) -> list[dict]:
     res = []
     for juego, es in sorted(por_juego.items(), key=lambda x: -len(x[1])):
         grupos = agrupar_pendientes(es, minimo=1)
+        for g in grupos:  # solo subcarpetas del juego (o el propio juego)
+            g["alternativas"] = [c for c in g["alternativas"] if c.startswith(juego + "/")]
         res.append({"juego": juego, "n": len(es), "grupos": grupos,
                     "sueltos": [e for e in es if not e["propuesta"]]})
     return res
@@ -320,8 +333,10 @@ def entrada(request: Request, vista: str = ""):
 
 @app.post("/entrada/lote")
 def decidir_lote(destino: Annotated[str, Form()], ids: Annotated[list[int] | None, Form()] = None,
-                 vista: Annotated[str, Form()] = "grupos"):
-    """Mueve de golpe los pendientes marcados de un grupo a su carpeta (la ejecuta el clasificador)."""
+                 vista: Annotated[str, Form()] = "grupos", destino_otra: Annotated[str, Form()] = ""):
+    """Mueve de golpe los marcados de un grupo a la carpeta elegida (la ejecuta el clasificador)."""
+    if destino == "__otra" or (destino_otra.strip() and not destino):
+        destino = destino_otra
     valido = destino_valido(cfg, destino)
     if not valido:
         raise HTTPException(400, f"Carpeta no válida: «{destino}»")
@@ -430,13 +445,40 @@ def api_carpetas(q: str = ""):
     palabras = normalizar(q).split()
     if not palabras or len(q.strip()) < 2:
         return JSONResponse([])
+    con = _con()
     res = []
-    for carpeta, norm, ultimo, n in _indice_carpetas(_con()):
+    for carpeta, norm, ultimo, n in _indice_carpetas(con):
         if all(p in norm for p in palabras):
             en_nombre = sum(p in ultimo for p in palabras)
             res.append((-en_nombre, carpeta.count("/"), -n, carpeta, n))
     res.sort()
-    return JSONResponse([{"carpeta": r[3], "n": r[4]} for r in res[:30]])
+    salida = [{"carpeta": r[3], "n": r[4]} for r in res[:20]]
+    # Y las carpetas donde hay ficheros que se llaman así: "DDAL" encuentra dónde están los DDAL09-xx.
+    vistas = {s["carpeta"] for s in salida}
+    for f in _carpetas_por_ficheros(con, q):
+        if f["carpeta"] not in vistas:
+            salida.append(f)
+    return JSONResponse(salida[:30])
+
+
+def _carpetas_por_ficheros(con, q: str, n: int = 12) -> list[dict]:
+    """Carpetas con ficheros cuyo nombre encaja con lo escrito, de la que más tiene a la que menos.
+
+    [{"carpeta", "n" (documentos en la carpeta), "coinciden", "ejemplo"}]
+    """
+    fts = consulta_fts(q)
+    if not fts:
+        return []
+    try:
+        filas = con.execute(
+            "SELECT d.carpeta, COUNT(*) AS k, MIN(d.nombre) AS ejemplo FROM docs_fts JOIN docs d ON d.id = docs_fts.rowid "
+            "WHERE docs_fts MATCH ? GROUP BY d.carpeta ORDER BY k DESC LIMIT ?",
+            ("{titulo pdf_titulo} : (" + fts + ")", n * 2)).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    totales = {c: k for c, _, _, k in _indice_carpetas(con)}
+    return [{"carpeta": f["carpeta"], "n": totales.get(f["carpeta"], f["k"]), "coinciden": f["k"], "ejemplo": f["ejemplo"]}
+            for f in filas if f["carpeta"] and "/_" not in "/" + f["carpeta"]][:n]
 
 
 # Facetas que se sugieren al escribir en el buscador.

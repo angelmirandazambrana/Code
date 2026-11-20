@@ -31,6 +31,7 @@ from .clasificador import (
     es_seguro,
     madre_segura,
     palabras,
+    por_serie,
     proponer,
     rasgos,
 )
@@ -416,6 +417,11 @@ def analizar(con, cfg) -> int:
         else:
             p = proponer(con, consulta, datos.get("editorial"))
             p = con_segunda_opinion(p, bayes, rasgos(consulta, datos.get("editorial"), r.get("pdf_titulo")))
+            serie = None if es_seguro(p, cfg.auto) else por_serie(bayes, f["nombre"])
+            if serie:
+                # "DDAL09-06": casi todos los DDAL09 que tenemos están en la misma carpeta.
+                otras = [a for a in p["alternativas"] if a[0] != serie["propuesta"]]
+                p = {**serie, "alternativas": [*serie["alternativas"], *otras][:5]}
         if f["es_carpeta"]:
             p = junto_a_sus_hermanas(p, f["nombre"])
         destino = p["propuesta"]

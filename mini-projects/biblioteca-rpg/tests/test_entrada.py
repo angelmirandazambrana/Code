@@ -277,7 +277,7 @@ def test_revision_por_grupos(entorno):
     importlib.reload(web)
     cli = TestClient(web.app)
     html = cli.get("/entrada?vista=grupos").text
-    assert "Mover los marcados aquí" in html and html.count('class="grupo"') == 1  # la suelta no forma grupo
+    assert "Mover los marcados" in html and 'name="destino_otra"' in html and html.count('class="grupo"') == 1  # la suelta no forma grupo
     ids = [_estado(con, f"Cosa rara {n}.pdf")["id"] for n in ("uno", "dos", "tres")]
     # Se desmarca uno: solo se mueven los otros dos.
     r = cli.post("/entrada/lote", data={"destino": "RPG/Traveller/Classic", "ids": ids[:2]}, follow_redirects=False)
@@ -287,6 +287,10 @@ def test_revision_por_grupos(entorno):
     assert (raiz / "RPG/Traveller/Classic/Cosa rara uno.pdf").is_file()
     assert (raiz / "RPG/Traveller/Classic/Cosa rara dos.pdf").is_file()
     assert _estado(con, "Cosa rara tres.pdf")["estado"] == "pendiente"
+    # Otra carpeta para el grupo (nueva): se escribe y se mueve allí.
+    cli.post("/entrada/lote", data={"destino": "__otra", "destino_otra": "RPG/Cosas raras", "ids": ids[2:]})
+    entrada.pasada(con, cfg)
+    assert (raiz / "RPG/Cosas raras/Cosa rara tres.pdf").is_file()
 
 
 def test_flip_mats_a_su_carpeta_de_assets():
@@ -385,3 +389,35 @@ def test_por_clasificar_exige_edicion_si_el_juego_las_tiene():
     votos = {k.replace("W/", "Wargames/", 1): v for k, v in votos.items()}
     m = _madre(votos, {c: 3 for c in votos}, 10.0)
     assert m["madre"] == "Wargames/Miniaturas/Games Workshop/Warhammer 40K/9e (2020)"
+
+
+def test_buscar_carpeta_por_nombres_de_ficheros(entorno):
+    import importlib
+
+    assert entorno  # la biblioteca de prueba
+    from biblioteca_rpg import web
+    importlib.reload(web)
+    cli = TestClient(web.app)
+    # "runelords" no está en ninguna carpeta, pero sí en un fichero de Adventure Path.
+    res = cli.get("/api/carpetas", params={"q": "runelords"}).json()
+    assert res[0]["carpeta"] == "RPG/Pathfinder/1e/Adventure Path"
+    assert res[0]["coinciden"] == 1 and res[0]["ejemplo"] == "Rise of the Runelords.pdf"
+    # Lo que encaja por el nombre de la carpeta va antes, sin "coinciden".
+    res = cli.get("/api/carpetas", params={"q": "shadowrun"}).json()
+    assert "coinciden" not in res[0]
+
+
+def test_codigo_de_serie():
+    from biblioteca_rpg.clasificador import Bayes, es_seguro, por_serie, series
+    assert series("DDAL09-06 - Infernal Insurgency.pdf") == {"ddal09"}
+    assert series("Vol 2 - Part 3.pdf") == set()
+    s9 = "RPG/D&D/Adventures/5e/Adventure League/S9"
+    filas = [(f"DDAL09-0{i} - Algo.pdf", s9, None, None) for i in range(1, 6)]
+    filas += [("DDAL09-07 - Perdido.pdf", "RPG/Otra", None, None)]
+    filas += [(f"DDAL08-0{i} - Otro.pdf", "RPG/D&D/S8", None, None) for i in range(1, 3)]
+    b = Bayes(filas)
+    assert por_serie(b, "DDAL09-06 - Infernal Insurgency.pdf") is None  # 5 de 6: 83%, no basta
+    filas += [(f"DDAL09-1{i} - Mas.pdf", s9, None, None) for i in range(5)]
+    p = por_serie(Bayes(filas), "DDAL09-06 - Infernal Insurgency.pdf")
+    assert p["propuesta"] == s9 and es_seguro(p, 0.9)        # 10 de 11
+    assert por_serie(Bayes(filas), "DDAL08-03 - Nuevo.pdf") is None  # solo 2 de la serie

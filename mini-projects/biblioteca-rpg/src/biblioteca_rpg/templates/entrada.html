@@ -2,27 +2,43 @@
 {% block titulo %}Entrada · Biblioteca{% endblock %}
 {% block contenido %}
 {% macro grupo_form(g, vista) %}
-      <form class="grupo" method="post" action="/entrada/lote">
-        <input type="hidden" name="destino" value="{{ g.carpeta }}">
-        <input type="hidden" name="vista" value="{{ vista }}">
-        <div class="grupo-cabecera">
-          <h3><span class="ruta">{{ g.carpeta }}</span></h3>
-          <span class="tenue">{{ g.entradas|length }} ficheros · confianza media {{ g.confianza }}%</span>
-          <button class="boton mini" type="button" data-marcar-todos>Marcar / desmarcar todos</button>
-          <button class="boton principal" type="submit">Mover los marcados aquí</button>
-        </div>
-        <ul class="grupo-lista">
-          {% for e in g.entradas %}
-            <li>
-              <label><input type="checkbox" name="ids" value="{{ e.id }}"{% if (e.confianza or 0) >= 0.5 %} checked{% endif %}>
-                {% if e.es_carpeta %}📁 {% endif %}{{ e.nombre }}</label>
-              <span class="tenue">{{ [e.tamano|tamano, (e.paginas ~ ' pág.') if e.paginas else None, e.editorial]|select|join(' · ') }}
-                · {{ ((e.confianza or 0) * 100)|round|int }}%</span>
-              <a class="tenue" href="/entrada/{{ e.id }}/pdf" target="_blank" rel="noopener">ver</a>
-            </li>
-          {% endfor %}
-        </ul>
-      </form>
+  <details class="grupo" open data-clave="{{ vista }}:{{ g.carpeta }}">
+    <summary class="grupo-cabecera">
+      <h3><span class="ruta">{{ g.carpeta }}</span></h3>
+      <span class="tenue">{{ g.entradas|length }} ficheros · confianza media {{ g.confianza }}%</span>
+    </summary>
+    <form method="post" action="/entrada/lote">
+      <input type="hidden" name="vista" value="{{ vista }}">
+      <fieldset class="grupo-destino">
+        <legend>¿A qué carpeta van los marcados?</legend>
+        {% for carpeta in g.alternativas %}
+          <label class="opcion"><input type="radio" name="destino" value="{{ carpeta }}" {% if loop.first %}checked{% endif %}>
+            <span class="ruta">{{ carpeta }}</span></label>
+        {% endfor %}
+        <label class="opcion otra"><input type="radio" name="destino" value="__otra">
+          <span class="buscador-carpeta">
+            <input type="text" name="destino_otra" placeholder="Otra carpeta: escribe palabras o una nueva (RPG/Gimmick-zero)" data-buscar-carpeta autocomplete="off">
+            <span class="sugerencias" role="listbox" hidden></span>
+          </span>
+        </label>
+      </fieldset>
+      <div class="acciones">
+        <button class="boton mini" type="button" data-marcar-todos>Marcar / desmarcar todos</button>
+        <button class="boton principal" type="submit">Mover los marcados</button>
+      </div>
+      <ul class="grupo-lista">
+        {% for e in g.entradas %}
+          <li>
+            <label><input type="checkbox" name="ids" value="{{ e.id }}"{% if (e.confianza or 0) >= 0.5 %} checked{% endif %}>
+              {% if e.es_carpeta %}📁 {% endif %}{{ e.nombre }}</label>
+            <span class="tenue">{{ [e.tamano|tamano, (e.paginas ~ ' pág.') if e.paginas else None, e.editorial]|select|join(' · ') }}
+              · {{ ((e.confianza or 0) * 100)|round|int }}%</span>
+            <a class="tenue" href="/entrada/{{ e.id }}/pdf" target="_blank" rel="noopener">ver</a>
+          </li>
+        {% endfor %}
+      </ul>
+    </form>
+  </details>
 {% endmacro %}
 <section class="entrada">
   <h1>Entrada</h1>
@@ -41,6 +57,12 @@
     </nav>
   {% endif %}
   {% if not pendientes %}<p class="vacio">Nada pendiente.</p>{% endif %}
+  {% if vista in ('grupos', 'por_clasificar') %}
+    <div class="plegar">
+      <button class="boton mini" type="button" data-plegar="cerrar">Plegar todos</button>
+      <button class="boton mini" type="button" data-plegar="abrir">Desplegar todos</button>
+    </div>
+  {% endif %}
 
   {% if vista == 'por_clasificar' %}
     <p class="tenue">Ya están en su juego, en la carpeta <code>{{ por_clasificar }}</code>, porque no estaba clara la subcarpeta.

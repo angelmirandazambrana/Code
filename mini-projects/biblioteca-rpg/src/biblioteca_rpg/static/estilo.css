@@ -329,3 +329,12 @@ main { padding: 16px 20px 40px; max-width: 1600px; margin: 0 auto; }
   border-top: 1px solid var(--borde, #eee); font-size: 14px; }
 .grupo-lista label { flex: 1 1 320px; overflow-wrap: anywhere; cursor: pointer; }
 .grupo-lista input { margin-right: 6px; }
+.grupo > summary { cursor: pointer; list-style: none; }
+.grupo > summary::-webkit-details-marker { display: none; }
+.grupo > summary h3::before { content: "▸ "; color: var(--tenue); }
+.grupo[open] > summary h3::before { content: "▾ "; }
+.grupo-destino { border: 0; padding: 0; margin: 12px 0 6px; }
+.grupo-destino legend { font-size: 13px; color: var(--tenue); padding: 0; margin-bottom: 4px; }
+.grupo .acciones { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 4px; }
+.plegar { display: flex; gap: 8px; margin: 0 0 12px; }
+.sugerencias .ejemplo { display: block; color: var(--tenue); font-size: 12px; font-family: inherit; }

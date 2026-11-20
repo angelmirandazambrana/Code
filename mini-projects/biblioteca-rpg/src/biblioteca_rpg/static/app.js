@@ -94,15 +94,23 @@ document.querySelectorAll("[data-buscar-carpeta]").forEach((input) => {
         b.append(Object.assign(document.createElement("span"), { textContent: "➕ Crear carpeta nueva: " + ruta }));
         b.addEventListener("mousedown", (e) => { e.preventDefault(); elegir(ruta); });
         caja.append(b);
-      } else if (!res.length) {
+      } else if (!res.length) {  // ni carpetas ni ficheros con esas palabras
         caja.append(Object.assign(document.createElement("span"), { className: "sin-resultados", textContent: "Ninguna carpeta con esas palabras. Para una nueva, escribe la ruta entera (p. ej. RPG/Gimmick-zero)." }));
       }
-      res.forEach(({ carpeta, n }) => {
+      let separador = false;
+      res.forEach(({ carpeta, n, coinciden, ejemplo }) => {
+        if (coinciden && !separador) {
+          separador = true;
+          caja.append(Object.assign(document.createElement("span"), { className: "sin-resultados", textContent: "Donde hay ficheros que se llaman así:" }));
+        }
         const b = document.createElement("button");
         b.type = "button";
         b.dataset.carpeta = carpeta;
         const ruta = document.createElement("span");
-        ruta.append(resaltar(carpeta, palabras));
+        ruta.append(resaltar(carpeta, coinciden ? [] : palabras));
+        if (coinciden) {
+          ruta.append(Object.assign(document.createElement("small"), { className: "ejemplo", textContent: ` ${coinciden} así, p. ej. «${ejemplo}»` }));
+        }
         b.append(ruta, Object.assign(document.createElement("span"), { className: "n", textContent: n }));
         b.addEventListener("mousedown", (e) => { e.preventDefault(); elegir(carpeta); });
         caja.append(b);
@@ -134,7 +142,7 @@ if (location.pathname === "/entrada") {
       window.addEventListener("load", () => window.scrollTo(0, Number(y)), { once: true });
     }
   } catch (_) { /* sin almacenamiento: se queda arriba */ }
-  document.querySelectorAll("form.decision, form.grupo, details.corregir form").forEach((f) =>
+  document.querySelectorAll("form.decision, details.grupo form, details.corregir form").forEach((f) =>
     f.addEventListener("submit", () => {
       try { sessionStorage.setItem(clave, String(window.scrollY)); } catch (_) { /* nada */ }
     }));
@@ -213,3 +221,27 @@ document.querySelectorAll("[data-marcar-todos]").forEach((b) =>
     const marcar = casillas.some((c) => !c.checked);
     casillas.forEach((c) => { c.checked = marcar; });
   }));
+
+// Entrada: grupos plegables. Los que se pliegan siguen plegados al volver a la página.
+(() => {
+  const grupos = [...document.querySelectorAll("details.grupo[data-clave]")];
+  if (!grupos.length) return;
+  const clave = "entrada-plegados";
+  let plegados = new Set();
+  try { plegados = new Set(JSON.parse(localStorage.getItem(clave) || "[]")); } catch (_) { /* sin almacenamiento */ }
+  const guardar = () => {
+    try { localStorage.setItem(clave, JSON.stringify([...plegados].slice(-500))); } catch (_) { /* nada */ }
+  };
+  grupos.forEach((d) => {
+    if (plegados.has(d.dataset.clave)) d.open = false;
+    d.addEventListener("toggle", () => {
+      if (d.open) plegados.delete(d.dataset.clave); else plegados.add(d.dataset.clave);
+      guardar();
+    });
+  });
+  document.querySelectorAll("[data-plegar]").forEach((b) =>
+    b.addEventListener("click", () => {
+      const abrir = b.dataset.plegar === "abrir";
+      grupos.forEach((d) => { d.open = abrir; });
+    }));
+})();

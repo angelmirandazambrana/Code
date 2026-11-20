@@ -190,6 +190,7 @@ class Bayes:
         self.docs: dict[str, int] = {}
         self.tokens: dict[str, int] = {}           # carpeta -> nº de rasgos
         self.cuenta: dict[str, dict[str, int]] = {}  # rasgo -> {carpeta: veces}
+        self.series: dict[str, dict[str, int]] = {}  # "ddal09" -> {carpeta: veces}
         for nombre, carpeta, editorial, titulo in filas:
             if not _valida(carpeta):
                 continue
@@ -198,6 +199,9 @@ class Bayes:
             self.tokens[carpeta] = self.tokens.get(carpeta, 0) + len(r)
             for x in r:
                 por = self.cuenta.setdefault(x, {})
+                por[carpeta] = por.get(carpeta, 0) + 1
+            for x in series(nombre):
+                por = self.series.setdefault(x, {})
                 por[carpeta] = por.get(carpeta, 0) + 1
         self.n = sum(self.docs.values())
         self.v = len(self.cuenta)
@@ -222,6 +226,44 @@ class Bayes:
         m = max(punt.values())
         c = max(punt, key=punt.get)
         return c, 1 / sum(math.exp(v - m) for v in punt.values())
+
+
+# --- Códigos de serie: "DDAL09-06", "CCC-BMG-01", "WD 145" ------------------------------
+#
+# Si los ficheros con el mismo código de serie están casi todos en una carpeta, ahí va el nuevo.
+# En la biblioteca: dispara en ~2,5% de los libros y acierta el ~97% (≥3 ficheros, ≥90% juntos).
+
+RE_SERIE = re.compile(r"(?<![a-z0-9])([a-z]{2,6})[ _-]?(\d{1,3})(?=[^0-9]|$)")
+NO_SERIE = {"vol", "ed", "no", "part", "book", "issue", "pt", "ch", "season", "nr", "num", "rev", "ver", "vers",
+            "chapter", "level", "lvl", "page", "pag", "tier", "mk", "the", "and", "of"}
+SERIE_MINIMO = 3
+SERIE_CUOTA = 0.9
+
+
+def series(nombre: str) -> set[str]:
+    """Códigos de serie del nombre: "DDAL09-06 - Infernal Insurgency.pdf" -> {"ddal09"}."""
+    base = re.sub(r"\.[a-z0-9]{2,4}$", "", (nombre or "").lower())
+    return {f"{a}{b}" for a, b in RE_SERIE.findall(base) if a not in NO_SERIE}
+
+
+def por_serie(bayes: "Bayes | None", nombre: str) -> dict | None:
+    """Propuesta por código de serie, o None si no hay uno claro."""
+    if bayes is None:
+        return None
+    mejor = None
+    for s in series(nombre):
+        por = bayes.series.get(s) or {}
+        total = sum(por.values())
+        if total < SERIE_MINIMO:
+            continue
+        carpeta, k = max(por.items(), key=lambda x: x[1])
+        if k >= SERIE_MINIMO and k / total >= SERIE_CUOTA and _valida(carpeta) and (mejor is None or k > mejor[1]):
+            mejor = (carpeta, k, total)
+    if not mejor:
+        return None
+    carpeta, k, total = mejor
+    return {"propuesta": carpeta, "confianza": round(k / total, 3), "apoyos": k, "alternativas": [[carpeta, 100]],
+            "serie": True}
 
 
 def con_segunda_opinion(p: dict, bayes: "Bayes | None", r: list[str]) -> dict:
