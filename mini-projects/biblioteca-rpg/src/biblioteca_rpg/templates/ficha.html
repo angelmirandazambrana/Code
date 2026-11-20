@@ -17,8 +17,8 @@
     {% if d.pdf_titulo and d.pdf_titulo|lower != d.titulo|lower %}<p class="tenue">Título interno del PDF: {{ d.pdf_titulo }}</p>{% endif %}
 
     <div class="acciones">
-      <a class="boton principal" href="/pdf/{{ d.id }}/{{ d.nombre|qp }}" target="_blank" rel="noopener">Abrir PDF</a>
-      <a class="boton" href="/pdf/{{ d.id }}/{{ d.nombre|qp }}" download>Descargar</a>
+      <a class="boton principal" href="/pdf/{{ d.id }}/{{ d.nombre|qp }}" {% if d.nombre|ext == 'PDF' %}target="_blank" rel="noopener">Abrir PDF{% else %}download>Descargar {{ d.nombre|ext }}{% endif %}</a>
+      {% if d.nombre|ext == 'PDF' %}<a class="boton" href="/pdf/{{ d.id }}/{{ d.nombre|qp }}" download>Descargar</a>{% endif %}
       {% if ruta_red %}<button class="boton" type="button" data-copiar="{{ ruta_red }}">Copiar ruta de red</button>{% endif %}
     </div>
 
@@ -49,7 +49,7 @@
       <dt>Tamaño</dt><dd>{{ d.tamano|tamano }}</dd>
       <dt>En la biblioteca desde</dt><dd>{{ d.llegado_en|fecha }}</dd>
       <dt>Fichero</dt><dd class="ruta">{{ d.ruta }}</dd>
-      {% if d.error %}<dt>Aviso</dt><dd class="aviso">No se pudo leer el PDF: {{ d.error }}</dd>{% endif %}
+      {% if d.error %}<dt>Aviso</dt><dd class="aviso">No se pudo leer el fichero: {{ d.error }}</dd>{% endif %}
     </dl>
 
     {% set g = extras.get('geek') %}

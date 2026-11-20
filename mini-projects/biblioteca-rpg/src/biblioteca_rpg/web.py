@@ -6,6 +6,7 @@
 import json
 import time
 from pathlib import Path
+from typing import Annotated
 from urllib.parse import quote_plus, urlencode
 
 from fastapi import FastAPI, Form, HTTPException, Request
@@ -55,6 +56,8 @@ def _fecha(ts: int | None) -> str:
 plantillas.env.filters["tamano"] = _tamano
 plantillas.env.filters["fecha"] = _fecha
 plantillas.env.filters["qp"] = quote_plus
+# "Libro.epub" -> "EPUB"
+plantillas.env.filters["ext"] = lambda nombre: (nombre or "").rsplit(".", 1)[-1].upper() if "." in (nombre or "") else ""
 # Cambia en cada arranque: el navegador recarga CSS/JS tras una actualización.
 plantillas.env.globals["version"] = str(int(time.time()))
 plantillas.env.globals["pendientes_revisar"] = lambda: _con().execute(
@@ -247,8 +250,22 @@ def decidir(doc_id: int, accion: str, ref: int | None = None, volver: str = "/re
 
 # --- Entrada (_Inbox) y novedades ---------------------------------------------------
 
+def agrupar_pendientes(pendientes: list[dict], minimo: int = 2) -> list[dict]:
+    """Los pendientes con la misma carpeta propuesta, de los grupos más grandes a los más pequeños.
+
+    Para decidir de golpe: «estos 15 van a Kobold Press». Solo grupos de `minimo` o más.
+    """
+    por: dict[str, list[dict]] = {}
+    for e in pendientes:
+        if e["estado"] == "pendiente" and e.get("propuesta"):
+            por.setdefault(e["propuesta"], []).append(e)
+    grupos = [{"carpeta": c, "entradas": es, "confianza": round(sum(e["confianza"] or 0 for e in es) / len(es) * 100)}
+              for c, es in por.items() if len(es) >= minimo]
+    return sorted(grupos, key=lambda g: (-len(g["entradas"]), -g["confianza"], g["carpeta"]))
+
+
 @app.get("/entrada", response_class=HTMLResponse)
-def entrada(request: Request):
+def entrada(request: Request, vista: str = ""):
     con = _con()
 
     def lista(sql, *params):
@@ -259,13 +276,34 @@ def entrada(request: Request):
             out.append(e)
         return out
 
+    pendientes = lista("SELECT * FROM entrada WHERE estado IN ('pendiente', 'error') ORDER BY llegado_en, id")
+    por_grupos = vista == "grupos"
+    grupos = agrupar_pendientes(pendientes) if por_grupos else []
     return plantillas.TemplateResponse(request, "entrada.html", {
-        "pendientes": lista("SELECT * FROM entrada WHERE estado IN ('pendiente', 'error') ORDER BY llegado_en, id"),
+        "pendientes": pendientes, "grupos": grupos, "por_grupos": por_grupos,
+        "n_agrupados": sum(len(g["entradas"]) for g in grupos),
         "en_cola": lista("SELECT * FROM entrada WHERE estado IN ('nuevo', 'aprobado') ORDER BY id"),
         "recientes": lista("SELECT * FROM entrada WHERE estado IN ('movido', 'descartado') "
                            "ORDER BY movido_en DESC LIMIT 40"),
         "carpeta_entrada": cfg.entrada, "auto": cfg.auto, "duplicados": DUPLICADOS,
     })
+
+
+@app.post("/entrada/lote")
+def decidir_lote(destino: Annotated[str, Form()], ids: Annotated[list[int] | None, Form()] = None):
+    """Mueve de golpe los pendientes marcados de un grupo a su carpeta (la ejecuta el clasificador)."""
+    valido = destino_valido(cfg, destino)
+    if not valido:
+        raise HTTPException(400, f"Carpeta no válida: «{destino}»")
+    if not ids:
+        return RedirectResponse("/entrada?vista=grupos", status_code=303)
+    con = _con()
+    with con:
+        # Solo los que siguen pendientes: lo que ya está en cola o movido no se toca.
+        con.execute(f"UPDATE entrada SET estado='aprobado', destino=?, nuevo_nombre=NULL, auto=0, decidido_en=?, "
+                    f"nota=NULL WHERE estado='pendiente' AND id IN ({','.join('?' * len(ids))})",
+                    (valido, int(time.time()), *ids))
+    return RedirectResponse("/entrada?vista=grupos", status_code=303)
 
 
 @app.post("/entrada/{entrada_id}")
@@ -422,12 +460,30 @@ def api_sugerencias(q: str = ""):
     })
 
 
+def _fin_primera_carga(con) -> int:
+    """Momento en que acabó la primera indexación (toda la biblioteca de golpe: eso no son novedades).
+
+    Es el final del primer bloque de llegadas seguidas: la primera pausa de más de una hora.
+    """
+    primera = con.execute("SELECT MIN(llegado_en) FROM docs").fetchone()[0]
+    if primera in _PRIMERA_CARGA:  # una vez encontrada la pausa, ya no cambia
+        return _PRIMERA_CARGA[primera]
+    anterior = None
+    for (t,) in con.execute("SELECT llegado_en FROM docs WHERE llegado_en IS NOT NULL ORDER BY llegado_en"):
+        if anterior is not None and t - anterior > 3600:
+            _PRIMERA_CARGA[primera] = anterior + 1
+            return anterior + 1
+        anterior = t
+    return (anterior or 0) + 1
+
+
+_PRIMERA_CARGA: dict[int, int] = {}  # primera llegada -> fin de la primera carga
+
+
 @app.get("/novedades", response_class=HTMLResponse)
 def novedades(request: Request, dias: int = 30):
     con = _con()
-    # La primera indexación metió toda la biblioteca de golpe: eso no son novedades.
-    primera = con.execute("SELECT MIN(llegado_en) FROM docs").fetchone()[0] or 0
-    desde = max(primera + 86400, int(time.time()) - dias * 86400)
+    desde = max(_fin_primera_carga(con), int(time.time()) - dias * 86400)
     filas = con.execute("SELECT * FROM docs WHERE llegado_en >= ? ORDER BY llegado_en DESC, id DESC LIMIT 240",
                         (desde,)).fetchall()
     grupos: list = []
@@ -493,8 +549,13 @@ def pdf(doc_id: int, nombre: str = ""):
     ruta = (raiz / d["ruta"]).resolve()
     if raiz not in ruta.parents or not ruta.is_file():
         raise HTTPException(404, "Fichero no encontrado en la biblioteca")
-    return FileResponse(ruta, media_type="application/pdf", filename=d["nombre"],
-                        content_disposition_type="inline")
+    tipo = TIPOS_FICHERO.get(ruta.suffix.lower(), "application/octet-stream")
+    # El PDF se abre en el navegador; un ebook se descarga para leerlo en su aplicación.
+    return FileResponse(ruta, media_type=tipo, filename=d["nombre"],
+                        content_disposition_type="inline" if tipo == "application/pdf" else "attachment")
+
+
+TIPOS_FICHERO = {".pdf": "application/pdf", ".epub": "application/epub+zip", ".mobi": "application/x-mobipocket-ebook"}
 
 
 @app.get("/salud")

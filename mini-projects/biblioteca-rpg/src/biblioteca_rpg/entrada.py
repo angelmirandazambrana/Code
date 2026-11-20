@@ -24,7 +24,7 @@ from pathlib import Path
 
 from . import config as config_mod
 from . import texto_pdf
-from .clasificador import VECINOS, es_seguro, palabras, proponer
+from .clasificador import VECINOS, Bayes, con_segunda_opinion, es_seguro, palabras, proponer, rasgos
 from .db import conectar
 from .enriquecer import pasada_pdf
 from .indexador import _procesar_pdf, en_paralelo, generar_portadas, sincronizar
@@ -44,6 +44,37 @@ REGLAS_NOVELAS = [
     (re.compile(r"horus heresy", re.I), NOVELAS_40K + "/Horus Heresy"),
     (re.compile(r"warhammer|40\.?000|\b40k\b|black library|space marine|necromunda", re.I), NOVELAS_40K),
 ]
+
+
+def junto_a_sus_hermanas(p: dict, nombre: str) -> dict:
+    """Para una carpeta que llega: si la propuesta es una carpeta que se llama igual (sin contar los
+    números), el sitio es al lado, no dentro: "White Dwarf 110-119" va junto a "White Dwarf 020-029"
+    (y "Gimmick-Zero" se fusiona con "Gimmick Zero"). Las alternativas que acaban en el mismo
+    sitio suman sus votos, y con ellos la confianza.
+    """
+    propias = set(palabras(nombre))
+
+    def igual(ultimo: str) -> bool:
+        # Iguales salvo etiquetas cortas de la serie ("UK", "WH"): "200-209" es hermana de "240-249 UK".
+        otras = set(palabras(ultimo))
+        return bool(otras) and all(len(x) <= 3 for x in otras ^ propias) and len(otras & propias) >= 2 \
+            or otras == propias
+
+    def sitio(carpeta: str) -> str:
+        # Hacia arriba mientras se llame igual (por si alguna ya quedó anidada dentro de otra).
+        while propias and "/" in carpeta and igual(carpeta.rsplit("/", 1)[-1]):
+            carpeta = carpeta.rsplit("/", 1)[0]
+        return carpeta
+
+    if not p.get("propuesta"):
+        return p
+    sumas: dict[str, float] = {}
+    for carpeta, pct in p["alternativas"]:
+        sumas[sitio(carpeta)] = sumas.get(sitio(carpeta), 0) + pct
+    alternativas = [[c, round(v)] for c, v in sorted(sumas.items(), key=lambda x: -x[1])]
+    propuesta = sitio(p["propuesta"])
+    return {**p, "propuesta": propuesta, "alternativas": alternativas,
+            "confianza": max(p["confianza"], round(sumas.get(propuesta, 0) / 100, 3))}
 
 
 def canal_telegram(con, nombre: str) -> str:
@@ -159,6 +190,14 @@ def descomprimir(con, cfg, archivo: Path, log: Registro) -> None:
     # bsdtar (libarchive) lee zip, rar y 7z, y no extrae rutas absolutas ni con '..'.
     r = subprocess.run([os.environ.get("BIBLIOTECA_TAR") or shutil.which("bsdtar") or "tar", "-xf", str(archivo), "-C", str(tmp)], capture_output=True, text=True, check=False,
                        timeout=1800)
+    siete = shutil.which("7zz") or shutil.which("7z")
+    if r.returncode != 0 and siete:
+        # bsdtar no abre algunos zip (Deflate64, el de Windows para ficheros grandes): 7-Zip sí.
+        # 7-Zip tampoco extrae rutas absolutas ni con '..'.
+        shutil.rmtree(tmp, ignore_errors=True)
+        tmp.mkdir()
+        r = subprocess.run([siete, "x", "-y", "-bd", f"-o{tmp}", str(archivo)], capture_output=True, text=True,
+                           check=False, timeout=1800)
     if r.returncode != 0:
         shutil.rmtree(tmp, ignore_errors=True)
         raise RuntimeError(f"no se pudo descomprimir: {(r.stderr or '').strip()[:200]}")
@@ -189,6 +228,16 @@ def escanear(con, cfg, log: Registro) -> int:
             continue
         rel = _rel(cfg, item)
         if rel in activos:
+            r = activos[rel]
+            if r["estado"] == "nuevo" and item.is_file() and item.suffix.lower() in COMPRIMIDOS:
+                # Un comprimido que falló y se pidió «Reintentar»: se vuelve a descomprimir.
+                try:
+                    descomprimir(con, cfg, item, log)
+                    estado, nota = "desaparecido", "descomprimido al reintentar"
+                except Exception as ex:
+                    estado, nota = "error", str(ex)[:300]
+                with con:
+                    con.execute("UPDATE entrada SET estado=?, nota=? WHERE id=?", (estado, nota, r["id"]))
             continue
         try:
             if ahora - _ultimo_cambio(item) < ESTABLE_SEG:
@@ -257,10 +306,22 @@ def buscar_duplicado(con, cfg, pdf: Path, tam: int) -> int | None:
     return None
 
 
+_BAYES: dict = {}
+
+
+def modelo_bayes(con) -> Bayes:
+    """El modelo de toda la biblioteca, rehecho solo cuando cambia el catálogo (tarda unos segundos)."""
+    version = con.execute("SELECT COUNT(*), MAX(id), MAX(actualizado_en) FROM docs").fetchone()
+    if _BAYES.get("version") != tuple(version):
+        _BAYES.update(version=tuple(version), modelo=Bayes.de(con))
+    return _BAYES["modelo"]
+
+
 def analizar(con, cfg) -> int:
     filas = con.execute("SELECT * FROM entrada WHERE estado='nuevo' ORDER BY id").fetchall()
     if not filas:
         return 0
+    bayes = modelo_bayes(con)
     conocidas = [r[0] for r in con.execute("SELECT DISTINCT editorial FROM docs WHERE editorial IS NOT NULL")]
     dicc = texto_pdf.diccionario_editoriales(conocidas)
     info: dict[int, dict] = {}
@@ -297,19 +358,18 @@ def analizar(con, cfg) -> int:
         # Texto para buscar parecidos: nombre, título interno, nombres de los PDF de dentro
         # y el mensaje de Telegram con el que llegó (si vino de allí).
         origen_texto = texto_telegram(con, f["nombre"])
-        consulta = " ".join([f["nombre"], r.get("pdf_titulo") or "", origen_texto[:300],
+        canal = canal_telegram(con, f["nombre"])  # "Warhammer 40000 9°Edicion": dice de qué juego es
+        consulta = " ".join([f["nombre"], r.get("pdf_titulo") or "", origen_texto[:300], canal,
                              *[p.stem for p in i["pdfs"][:10] if p.name != f["nombre"]]])
-        novela = None if f["es_carpeta"] else destino_novela(f["nombre"], canal_telegram(con, f["nombre"]))
+        novela = None if f["es_carpeta"] else destino_novela(f["nombre"], canal)
         if novela:
             p = {"propuesta": novela, "confianza": 1.0, "apoyos": VECINOS, "alternativas": [[novela, 100]]}
         else:
             p = proponer(con, consulta, datos.get("editorial"))
+            p = con_segunda_opinion(p, bayes, rasgos(consulta, datos.get("editorial"), r.get("pdf_titulo")))
+        if f["es_carpeta"]:
+            p = junto_a_sus_hermanas(p, f["nombre"])
         destino = p["propuesta"]
-        if destino and f["es_carpeta"]:
-            # La propuesta ya es la carpeta de este producto: se fusiona en ella, no se anida.
-            ultimo = destino.rsplit("/", 1)[-1]
-            if set(palabras(ultimo)) and set(palabras(ultimo)) == set(palabras(f["nombre"])):
-                destino = destino.rsplit("/", 1)[0] if "/" in destino else destino
         if todo_duplicado:
             estado, auto, destino = ("aprobado", 1, DUPLICADOS) if cfg.auto else ("pendiente", 0, DUPLICADOS)
         elif es_seguro(p, cfg.auto):
@@ -344,7 +404,7 @@ def destino_valido(cfg, destino: str) -> str | None:
     if any(c in x for x in partes for c in '<>:"|?*'):
         return None
     d = "/".join(partes)
-    if partes[0] in cfg.areas or d == DUPLICADOS or d.startswith(DUPLICADOS + "/"):
+    if config_mod.en_areas(cfg.areas, d) or d == DUPLICADOS or d.startswith(DUPLICADOS + "/"):
         return d
     return None
 
@@ -392,6 +452,11 @@ def mover(con, cfg, fila, log: Registro) -> tuple[str, str]:
         nombre += origen.suffix
     carpeta = cfg.raiz / destino_rel
     objetivo = carpeta / nombre
+    ultimo = destino_rel.rsplit("/", 1)[-1]
+    if origen.is_dir() and not (fila["nuevo_nombre"] or "").strip() and "/" in destino_rel \
+            and set(palabras(ultimo)) and set(palabras(ultimo)) == set(palabras(origen.name)):
+        # "Gimmick-Zero" a "RPG/Gimmick-zero": esa carpeta ES el destino (nueva o para fusionar), no se anida.
+        objetivo = carpeta
     nota = ""
     if objetivo.exists() and origen.is_dir() and objetivo.is_dir():
         notas = _fusionar(origen, objetivo, cfg, log)
@@ -428,7 +493,7 @@ def ejecutar_aprobados(con, cfg, log: Registro) -> int:
                          int(time.time()), f["id"]))
         print(f"  movido: {anterior} -> {nueva}", flush=True)
         for rel in (anterior, nueva):
-            if rel.split("/", 1)[0] in cfg.areas:
+            if config_mod.en_areas(cfg.areas, rel):
                 # El catálogo se pone al día solo en lo tocado: la carpeta (o la que contiene el fichero).
                 carpetas_tocadas.add(rel if (cfg.raiz / rel).is_dir() or not Path(rel).suffix else rel.rsplit("/", 1)[0])
     if carpetas_tocadas:

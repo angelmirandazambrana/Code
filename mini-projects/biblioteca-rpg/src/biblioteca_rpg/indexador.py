@@ -21,7 +21,8 @@ from . import config as config_mod
 from .db import CAMPOS_RUTA, conectar
 from .rutas import analizar
 
-EXTENSIONES = {".pdf"}
+EXTENSIONES = {".pdf", ".epub", ".mobi"}
+EBOOKS = {".epub", ".mobi"}  # libros sin páginas fijas: el nº de páginas depende de la pantalla
 ANCHO_PORTADA = 360
 TIEMPO_MAX_PDF = 90  # segundos por fichero antes de darlo por colgado
 
@@ -123,13 +124,15 @@ def _procesar_pdf(ruta_pdf: str, ruta_jpg: str) -> dict:
     pymupdf.TOOLS.mupdf_display_warnings(False)
     with pymupdf.open(ruta_pdf) as doc:
         meta = doc.metadata or {}
+        # En un ebook contar páginas obliga a maquetar el libro entero (lento y sin sentido).
+        ebook = Path(ruta_pdf).suffix.lower() in EBOOKS
         res = {
-            "paginas": doc.page_count,
+            "paginas": None if ebook else doc.page_count,
             "pdf_titulo": (meta.get("title") or "").strip()[:300] or None,
             "pdf_autor": (meta.get("author") or "").strip()[:300] or None,
         }
-        if doc.page_count:
-            pagina = doc[0]
+        if ebook or doc.page_count:
+            pagina = doc.load_page(0)  # en un epub, la portada
             ancho = pagina.rect.width or 600
             alto = pagina.rect.height or 800
             zoom = ANCHO_PORTADA / ancho

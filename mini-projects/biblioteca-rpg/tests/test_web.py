@@ -84,3 +84,17 @@ def test_sugerencias(cliente):
     r = cliente.get("/api/sugerencias", params={"q": "shadowrun"}).json()
     assert any(v["etiqueta"] == "Sistema / línea" for v in r["valores"])
     assert cliente.get("/api/sugerencias", params={"q": "x"}).json() == {"valores": [], "libros": []}
+
+
+def test_novedades_no_cuenta_la_primera_carga():
+    import sqlite3
+
+    from biblioteca_rpg import web
+    con = sqlite3.connect(":memory:")
+    con.execute("CREATE TABLE docs (llegado_en INTEGER)")
+    t0 = 1_800_000_000
+    con.executemany("INSERT INTO docs VALUES (?)", [(t0 + i,) for i in range(0, 1200, 3)])  # 20 min de carga
+    assert web._fin_primera_carga(con) > t0 + 1197  # sin pausa todavía: nada es novedad
+    con.execute("INSERT INTO docs VALUES (?)", (t0 + 5 * 3600,))  # llega algo horas después
+    fin = web._fin_primera_carga(con)
+    assert t0 + 1197 < fin <= t0 + 1198

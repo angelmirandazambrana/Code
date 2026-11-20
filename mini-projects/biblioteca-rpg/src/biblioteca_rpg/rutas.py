@@ -141,6 +141,15 @@ def analizar(ruta: str) -> Datos:
     if not carpetas:
         return d
 
+    if carpetas[0] == "assets":
+        # Papercraft y miniaturas de papel: assets/Papercraft/<editorial>/... o
+        # assets/By Artist or Source/<editorial>/.../Paper Minis
+        d.categoria, d.tipo = "Papercraft", "Papercraft"
+        if len(carpetas) > 2:
+            d.editorial = carpetas[2]
+            if carpetas[1] != "Papercraft" and len(carpetas) > 3:
+                d.sistema = limpiar(carpetas[3])
+        return d
     d.categoria = CATEGORIAS.get(carpetas[0], limpiar(carpetas[0]))
     resto = carpetas[1:]
     if d.categoria == "Revistas":

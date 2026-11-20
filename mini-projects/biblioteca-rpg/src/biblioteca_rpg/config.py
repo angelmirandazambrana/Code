@@ -4,6 +4,23 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# Lo que se cataloga (y a donde se puede mover lo que llega). Puede ser una subcarpeta:
+# de assets solo entra el papercraft y las miniaturas de papel.
+AREAS = [
+    "RPG", "Wargames", "Magazines", "Juegos de mesa",
+    "assets/Papercraft",
+    "assets/By Artist or Source/Stephen Joy/Paper Minis",
+    "assets/By Artist or Source/Paizo/Pathfinder/Paper Minis",
+    "assets/By Artist or Source/Paizo/Pathfinder/Pawns",
+    "assets/By Artist or Source/Paizo/Starfinder/Pawns",
+]
+
+
+def en_areas(areas: list[str], rel: str) -> bool:
+    """¿Está la ruta (relativa a la raíz) dentro de lo catalogado?"""
+    rel = rel.strip("/")
+    return any(rel == a or rel.startswith(a + "/") for a in areas)
+
 
 def _lista(valor: str) -> list[str]:
     return [x.strip() for x in valor.split(",") if x.strip()]
@@ -17,7 +34,7 @@ class Config:
     datos: Path = field(default_factory=lambda: Path(os.environ.get("BIBLIOTECA_DATOS", "datos")))
     areas: list[str] = field(
         default_factory=lambda: _lista(
-            os.environ.get("BIBLIOTECA_AREAS", "RPG,Wargames,Magazines,Juegos de mesa")
+            os.environ.get("BIBLIOTECA_AREAS", ",".join(AREAS))
         )
     )
     # Ruta de red para mostrar en la ficha ("copiar ruta"), p. ej. \\OPENMEDIAVAULT3\Isengard

@@ -155,3 +155,135 @@ def test_novelas_de_warhammer_por_canal_o_nombre():
     assert destino_novela("Horus Heresy 01 - Horus Rising.mobi", "") == NOVELAS_40K + "/Horus Heresy"
     assert destino_novela("Codex Orks.pdf", "Codex Warhammer 40000") is None
     assert destino_novela("Dune.epub", "Libros de ciencia ficción") is None
+
+
+def test_palabras_de_edicion_y_genericas():
+    from biblioteca_rpg.clasificador import palabras
+    assert palabras("Warhammer_40k_9_Edicion_Libro_Basico_edicion_INDOMITUS_castellano.pdf") == \
+        ["warhammer", "40k", "9e", "indomitus"]
+    assert "5e" in palabras("D&D 5th Edition Player's Handbook")
+
+
+def test_carpeta_nueva_para_un_juego_que_no_teniamos(entorno):
+    cfg, con, raiz, entrada = entorno
+    for n in ("Gimmick Zero Core", "Gimmick Zero Quickstart"):
+        _pdf(raiz / f"_Inbox/Gimmick-Zero/{n}.pdf", n)
+    entrada.pasada(con, cfg)
+    e = _estado(con, "Gimmick-Zero")
+    assert e["estado"] == "pendiente"
+    import importlib
+
+    from biblioteca_rpg import web
+    importlib.reload(web)  # la web lee la configuración al importarse
+    cli = TestClient(web.app)
+    r = cli.post(f"/entrada/{e['id']}", data={"accion": "mover", "destino": "__otra",
+                                              "destino_otra": "RPG/Gimmick-zero"}, follow_redirects=False)
+    assert r.status_code == 303
+    entrada.pasada(con, cfg)
+    # La carpeta que llega ES la nueva: no queda RPG/Gimmick-zero/Gimmick-Zero.
+    assert (raiz / "RPG/Gimmick-zero/Gimmick Zero Core.pdf").is_file()
+    assert not (raiz / "RPG/Gimmick-zero/Gimmick-Zero").exists()
+    assert con.execute("SELECT COUNT(*) FROM docs WHERE carpeta='RPG/Gimmick-zero'").fetchone()[0] == 2
+
+
+def test_serie_de_revistas_va_junto_a_sus_hermanas():
+    from biblioteca_rpg.entrada import junto_a_sus_hermanas
+    base = "Magazines/White Dwarf Magazine/Old"
+    p = {"propuesta": f"{base}/White Dwarf - 020-029 UK", "confianza": 0.53, "apoyos": 9,
+         "alternativas": [[f"{base}/White Dwarf - 020-029 UK", 53], [f"{base}/White Dwarf - 030-039 UK", 30],
+                          ["RPG/Otra", 17]]}
+    r = junto_a_sus_hermanas(p, "White Dwarf - 110-119 UK")
+    assert r["propuesta"] == base and r["confianza"] == 0.83
+    assert r["alternativas"] == [[base, 83], ["RPG/Otra", 17]]
+
+
+def test_papercraft_es_un_area():
+    from biblioteca_rpg import config, rutas
+    cfg = config.cargar()
+    assert config.en_areas(cfg.areas, "assets/Papercraft/Fat Dragon Games/E Z Dungeons")
+    assert not config.en_areas(cfg.areas, "assets/Tokens/x")
+    assert not config.en_areas(cfg.areas, "assets/PapercraftX")
+    d = rutas.analizar("assets/Papercraft/Fat Dragon Games/E Z Dungeons/Dungeon.pdf")
+    assert (d.categoria, d.editorial) == ("Papercraft", "Fat Dragon Games")
+
+
+def test_hermanas_ya_anidadas_suben_hasta_su_sitio():
+    from biblioteca_rpg.entrada import junto_a_sus_hermanas
+    base = "Magazines/WD/Old"
+    anidada = f"{base}/White Dwarf - 020-029 UK/White Dwarf - 050-059 UK"
+    p = {"propuesta": anidada, "confianza": 0.3, "apoyos": 8, "alternativas": [[anidada, 30], [base, 70]]}
+    assert junto_a_sus_hermanas(p, "White Dwarf - 110-119 UK")["alternativas"] == [[base, 100]]
+
+
+def test_reintentar_un_comprimido_lo_descomprime(entorno, monkeypatch):
+    cfg, con, raiz, entrada = entorno
+    _pdf(raiz / "tmp/Revista 001.pdf", "Revista")
+    with zipfile.ZipFile(raiz / "_Inbox/Revistas.zip", "w") as z:
+        z.write(raiz / "tmp/Revista 001.pdf", "Revista 001.pdf")
+    real = entrada.descomprimir
+    monkeypatch.setattr(entrada, "descomprimir", lambda *a: (_ for _ in ()).throw(RuntimeError("método raro")))
+    entrada.pasada(con, cfg)
+    e = _estado(con, "Revistas.zip")
+    assert e["estado"] == "error"
+    monkeypatch.setattr(entrada, "descomprimir", real)
+    with con:
+        con.execute("UPDATE entrada SET estado='nuevo' WHERE id=?", (e["id"],))  # «Reintentar» en la web
+    entrada.pasada(con, cfg)
+    assert _estado(con, "Revistas.zip")["estado"] == "desaparecido"
+    assert (raiz / "_Inbox/Revistas").is_dir() or _estado(con, "Revistas") is not None
+
+
+def test_hermanas_con_etiquetas_cortas_distintas():
+    from biblioteca_rpg.entrada import junto_a_sus_hermanas
+    base = "Magazines/WD/Old"
+    p = {"propuesta": f"{base}/Warhammer - White Dwarf - 240-249 UK", "confianza": 0.4, "apoyos": 8,
+         "alternativas": [[f"{base}/Warhammer - White Dwarf - 240-249 UK", 40], [base, 30],
+                          ["RPG/Warhammer Fantasy Roleplay", 30]]}
+    r = junto_a_sus_hermanas(p, "Warhammer - White Dwarf - 200-209")
+    assert r["propuesta"] == base and r["alternativas"][0] == [base, 70]
+    # Una sola palabra en común no basta: "Warhammer Fantasy Roleplay" no es hermana de "Warhammer 40K".
+    q = {"propuesta": "RPG/Warhammer Fantasy Roleplay", "confianza": 1.0, "apoyos": 9,
+         "alternativas": [["RPG/Warhammer Fantasy Roleplay", 100]]}
+    assert junto_a_sus_hermanas(q, "Warhammer 40K")["propuesta"] == "RPG/Warhammer Fantasy Roleplay"
+
+
+def test_bayes_y_vecinos_de_acuerdo():
+    from biblioteca_rpg.clasificador import Bayes, con_segunda_opinion, es_seguro, rasgos
+    filas = [(f"Shadowrun {x}.pdf", "RPG/Shadowrun/5e", "Catalyst", None) for x in ("Core", "Kill Code", "Data Trails")]
+    filas += [(f"Traveller {x}.pdf", "RPG/Traveller", "GDW", None) for x in ("Book 1", "Book 2", "Book 3")]
+    b = Bayes(filas)
+    carpeta, prob = b.mejor(rasgos("Shadowrun Run Faster.pdf", "Catalyst"))
+    assert carpeta == "RPG/Shadowrun/5e" and prob > 0.9
+    p = {"propuesta": "RPG/Shadowrun/5e", "confianza": 0.6, "apoyos": 2, "alternativas": []}
+    assert not es_seguro(p, 0.9)  # los vecinos solos no bastan
+    assert es_seguro(con_segunda_opinion(p, b, rasgos("Shadowrun Run Faster.pdf", "Catalyst")), 0.9)
+    otro = {**p, "propuesta": "RPG/Traveller"}  # Bayes no está de acuerdo: se pregunta
+    assert not es_seguro(con_segunda_opinion(otro, b, rasgos("Shadowrun Run Faster.pdf", "Catalyst")), 0.9)
+
+
+def test_revision_por_grupos(entorno):
+    import importlib
+
+    cfg, con, raiz, entrada = entorno
+    for n in ("Cosa rara uno", "Cosa rara dos", "Cosa rara tres", "Otra suelta"):
+        _pdf(raiz / f"_Inbox/{n}.pdf", n)
+    entrada.pasada(con, cfg)
+    with con:  # tres proponen la misma carpeta; una va sola
+        con.execute("UPDATE entrada SET estado='pendiente', propuesta='RPG/Traveller/Classic', confianza=0.5 "
+                    "WHERE nombre LIKE 'Cosa rara%'")
+        con.execute("UPDATE entrada SET estado='pendiente', propuesta='RPG/Pathfinder/1e', confianza=0.4 "
+                    "WHERE nombre LIKE 'Otra%'")
+    from biblioteca_rpg import web
+    importlib.reload(web)
+    cli = TestClient(web.app)
+    html = cli.get("/entrada?vista=grupos").text
+    assert "Mover los marcados aquí" in html and html.count('class="grupo"') == 1  # la suelta no forma grupo
+    ids = [_estado(con, f"Cosa rara {n}.pdf")["id"] for n in ("uno", "dos", "tres")]
+    # Se desmarca uno: solo se mueven los otros dos.
+    r = cli.post("/entrada/lote", data={"destino": "RPG/Traveller/Classic", "ids": ids[:2]}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/entrada?vista=grupos"
+    assert cli.post("/entrada/lote", data={"destino": "../etc", "ids": ids[2:]}).status_code == 400
+    entrada.pasada(con, cfg)
+    assert (raiz / "RPG/Traveller/Classic/Cosa rara uno.pdf").is_file()
+    assert (raiz / "RPG/Traveller/Classic/Cosa rara dos.pdf").is_file()
+    assert _estado(con, "Cosa rara tres.pdf")["estado"] == "pendiente"

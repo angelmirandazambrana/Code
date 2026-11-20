@@ -10,8 +10,42 @@
   </p>
 
   <h2>Por revisar <span class="n">{{ pendientes|length }}</span></h2>
+  {% if pendientes %}
+    <nav class="vistas" aria-label="Cómo revisar">
+      <a href="/entrada"{% if not por_grupos %} aria-current="page"{% endif %}>Uno a uno</a>
+      <a href="/entrada?vista=grupos"{% if por_grupos %} aria-current="page"{% endif %}>Por grupos</a>
+    </nav>
+  {% endif %}
   {% if not pendientes %}<p class="vacio">Nada pendiente.</p>{% endif %}
-  {% for e in pendientes %}
+
+  {% if por_grupos %}
+    <p class="tenue">Los pendientes que proponen la misma carpeta, juntos: {{ n_agrupados }} en {{ grupos|length }} grupos.
+      Vienen marcados los que tienen un 50% de confianza o más: revisa, marca o desmarca y mueve el resto de una vez. Los que quedan solos se revisan <a href="/entrada">uno a uno</a>.</p>
+    {% for g in grupos %}
+      <form class="grupo" method="post" action="/entrada/lote">
+        <input type="hidden" name="destino" value="{{ g.carpeta }}">
+        <div class="grupo-cabecera">
+          <h3><span class="ruta">{{ g.carpeta }}</span></h3>
+          <span class="tenue">{{ g.entradas|length }} ficheros · confianza media {{ g.confianza }}%</span>
+          <button class="boton mini" type="button" data-marcar-todos>Marcar / desmarcar todos</button>
+          <button class="boton principal" type="submit">Mover los marcados aquí</button>
+        </div>
+        <ul class="grupo-lista">
+          {% for e in g.entradas %}
+            <li>
+              <label><input type="checkbox" name="ids" value="{{ e.id }}"{% if (e.confianza or 0) >= 0.5 %} checked{% endif %}>
+                {% if e.es_carpeta %}📁 {% endif %}{{ e.nombre }}</label>
+              <span class="tenue">{{ [e.tamano|tamano, (e.paginas ~ ' pág.') if e.paginas else None, e.editorial]|select|join(' · ') }}
+                · {{ ((e.confianza or 0) * 100)|round|int }}%</span>
+              <a class="tenue" href="/entrada/{{ e.id }}/pdf" target="_blank" rel="noopener">ver</a>
+            </li>
+          {% endfor %}
+        </ul>
+      </form>
+    {% endfor %}
+  {% endif %}
+
+  {% for e in pendientes if not por_grupos %}
     <article class="lote{% if e.estado == 'error' %} con-error{% endif %}">
       <a class="lote-portada" href="/entrada/{{ e.id }}/pdf" target="_blank" rel="noopener"><img src="/entrada/{{ e.id }}/portada.jpg" alt="" loading="lazy"></a>
       <div class="lote-datos">
@@ -38,7 +72,7 @@
             {% endfor %}
             <label class="opcion otra"><input type="radio" name="destino" value="__otra" {% if not e.alternativas %}checked{% endif %}>
               <span class="buscador-carpeta">
-                <input type="text" name="destino_otra" placeholder="Otra carpeta: escribe palabras (p. ej. shadowrun 5e)" data-buscar-carpeta autocomplete="off">
+                <input type="text" name="destino_otra" placeholder="Otra carpeta: escribe palabras (shadowrun 5e) o una nueva (RPG/Gimmick-zero)" data-buscar-carpeta autocomplete="off">
                 <span class="sugerencias" role="listbox" hidden></span>
               </span>
             </label>

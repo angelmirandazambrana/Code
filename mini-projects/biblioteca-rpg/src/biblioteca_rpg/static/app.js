@@ -84,8 +84,18 @@ document.querySelectorAll("[data-buscar-carpeta]").forEach((input) => {
       if (yo !== peticion) return;  // llegó tarde: ya se escribió otra cosa
       const palabras = sinAcentos(q).split(/[^a-z0-9]+/).filter(Boolean);
       caja.replaceChildren();
-      if (!res.length) {
-        caja.append(Object.assign(document.createElement("span"), { className: "sin-resultados", textContent: "Ninguna carpeta con esas palabras. Puedes escribir una ruta nueva (RPG/…)." }));
+      // "RPG/Gimmick-zero": una ruta que aún no existe se puede crear al mover.
+      const ruta = q.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+      if (ruta.includes("/") && !res.some(({ carpeta }) => carpeta.toLowerCase() === ruta.toLowerCase())) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "crear";
+        b.dataset.carpeta = ruta;
+        b.append(Object.assign(document.createElement("span"), { textContent: "➕ Crear carpeta nueva: " + ruta }));
+        b.addEventListener("mousedown", (e) => { e.preventDefault(); elegir(ruta); });
+        caja.append(b);
+      } else if (!res.length) {
+        caja.append(Object.assign(document.createElement("span"), { className: "sin-resultados", textContent: "Ninguna carpeta con esas palabras. Para una nueva, escribe la ruta entera (p. ej. RPG/Gimmick-zero)." }));
       }
       res.forEach(({ carpeta, n }) => {
         const b = document.createElement("button");
@@ -110,6 +120,25 @@ document.querySelectorAll("[data-buscar-carpeta]").forEach((input) => {
   });
   input.addEventListener("blur", () => setTimeout(cerrar, 100));
 });
+
+// Entrada: al decidir sobre un lote, la página vuelve a cargarse; se queda donde estaba
+// (el lote decidido desaparece y el siguiente ocupa su sitio) en vez de saltar arriba.
+if (location.pathname === "/entrada") {
+  const clave = "entrada-scroll";
+  try {
+    const y = sessionStorage.getItem(clave);
+    if (y !== null) {
+      sessionStorage.removeItem(clave);
+      history.scrollRestoration = "manual";
+      window.scrollTo(0, Number(y));
+      window.addEventListener("load", () => window.scrollTo(0, Number(y)), { once: true });
+    }
+  } catch (_) { /* sin almacenamiento: se queda arriba */ }
+  document.querySelectorAll("form.decision, form.grupo, details.corregir form").forEach((f) =>
+    f.addEventListener("submit", () => {
+      try { sessionStorage.setItem(clave, String(window.scrollY)); } catch (_) { /* nada */ }
+    }));
+}
 
 // Buscador de la cabecera: escritura predictiva con editoriales, sistemas y títulos que tenemos.
 document.querySelectorAll("[data-sugerir]").forEach((input) => {
@@ -176,3 +205,11 @@ document.querySelectorAll("[data-sugerir]").forEach((input) => {
   caja.addEventListener("mousedown", (e) => e.preventDefault());
   input.addEventListener("blur", () => setTimeout(cerrar, 150));
 });
+
+// Entrada por grupos: marcar o desmarcar todos los ficheros de un grupo.
+document.querySelectorAll("[data-marcar-todos]").forEach((b) =>
+  b.addEventListener("click", () => {
+    const casillas = [...b.closest("form").querySelectorAll("input[name=ids]")];
+    const marcar = casillas.some((c) => !c.checked);
+    casillas.forEach((c) => { c.checked = marcar; });
+  }));

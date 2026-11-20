@@ -7,7 +7,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     BIBLIOTECA_DATOS=/datos
 
 # bsdtar (libarchive): descomprimir zip, rar y 7z de la carpeta de entrada.
-RUN apt-get update     && apt-get install -y --no-install-recommends libarchive-tools     && rm -rf /var/lib/apt/lists/*
+# 7-Zip: lo que bsdtar no sabe abrir (zip con Deflate64, p. ej.).
+RUN apt-get update     && apt-get install -y --no-install-recommends libarchive-tools 7zip     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY requirements.txt .
