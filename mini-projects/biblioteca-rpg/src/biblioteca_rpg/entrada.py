@@ -397,6 +397,83 @@ def modelo_bayes(con) -> Bayes:
     return _BAYES["modelo"]
 
 
+def proponer_entrada(con, cfg, bayes, f, pdfs: list, editorial, pdf_titulo, origen_texto: str, canal: str) -> dict:
+    """La propuesta de carpeta para una entrada (lo mismo al llegar que al repasar los pendientes)."""
+    # Texto para buscar parecidos: nombre, título interno, nombres de los PDF de dentro
+    # y el mensaje de Telegram con el que llegó (si vino de allí).
+    consulta = " ".join([f["nombre"], pdf_titulo or "", (origen_texto or "")[:300], canal,
+                         *[p.stem for p in pdfs[:10] if p.name != f["nombre"]]])
+    novela = destino_mapa(f["nombre"], canal) or (None if f["es_carpeta"] else destino_novela(f["nombre"], canal))
+    if novela:
+        p = {"propuesta": novela, "confianza": 1.0, "apoyos": VECINOS, "alternativas": [[novela, 100]]}
+    elif not pdfs and Path(f["nombre"]).suffix.lower() not in EBOOKS:
+        # Sin PDF (pack de mapas, tokens, música…): se compara con las carpetas de assets,
+        # usando también los nombres de lo que trae dentro.
+        p = packs.proponer(con, " ".join([consulta, *_nombres_dentro(cfg.raiz / f["ruta_actual"])]))
+    else:
+        p = proponer(con, consulta, editorial)
+        p = con_segunda_opinion(p, bayes, rasgos(consulta, editorial, pdf_titulo))
+        serie = None if es_seguro(p, cfg.auto) else por_serie(bayes, f["nombre"])
+        if serie:
+            # "DDAL09-06": casi todos los DDAL09 que tenemos están en la misma carpeta.
+            otras = [a for a in p["alternativas"] if a[0] != serie["propuesta"]]
+            p = {**serie, "alternativas": [*serie["alternativas"], *otras][:5]}
+    if f["es_carpeta"]:
+        p = junto_a_sus_hermanas(p, f["nombre"])
+    return p
+
+
+_REPASO: dict = {}
+REPASO_CADA = 600  # segundos: como mucho un repaso cada 10 minutos
+
+
+def repasar_pendientes(con, cfg, log: "Registro | None" = None, forzar: bool = False) -> int:
+    """Vuelve a proponer carpeta para lo que espera revisión cuando la biblioteca ha cambiado.
+
+    Lo que se coloca (a mano o solo) sirve de ejemplo para lo parecido: un pendiente de ayer puede
+    estar claro hoy. Solo recalcula la propuesta (sin releer los PDF); lo que ahora es seguro se
+    aprueba solo, como lo que llega nuevo, y el resto queda con la propuesta al día.
+    """
+    version = tuple(con.execute("SELECT COUNT(*), MAX(id), MAX(actualizado_en) FROM docs").fetchone())
+    ahora = time.time()
+    if not forzar and (_REPASO.get("version") == version or ahora - _REPASO.get("cuando", 0) < REPASO_CADA):
+        return 0
+    _REPASO.update(version=version, cuando=ahora)
+    filas = con.execute("SELECT * FROM entrada WHERE estado='pendiente' AND destino IS NULL ORDER BY id").fetchall()
+    if not filas:
+        return 0
+    bayes = modelo_bayes(con)
+    aprobados = cambiados = 0
+    for f in filas:
+        ruta = cfg.raiz / f["ruta_actual"]
+        if not ruta.exists():
+            continue  # lo marcará el escaneo
+        p = proponer_entrada(con, cfg, bayes, f, _pdfs(ruta), f["editorial"], f["pdf_titulo"],
+                             f["origen_texto"] or "", canal_telegram(con, f["nombre"]))
+        if not p.get("propuesta"):
+            continue
+        destino = p["propuesta"] if es_seguro(p, cfg.auto) else madre_segura(p, cfg.auto)
+        alternativas = json.dumps(p["alternativas"], ensure_ascii=False)
+        if not destino and p["propuesta"] == f["propuesta"] and alternativas == f["alternativas"]:
+            continue
+        with con:
+            if destino:
+                con.execute("UPDATE entrada SET propuesta=?, confianza=?, apoyos=?, alternativas=?, estado='aprobado', "
+                            "destino=?, auto=1, decidido_en=?, nota=? WHERE id=? AND estado='pendiente'",
+                            (p["propuesta"], p["confianza"], p["apoyos"], alternativas, destino, int(ahora),
+                             "colocado al repasar los pendientes", f["id"]))
+                aprobados += 1
+                print(f"  repaso: {f['nombre']} -> {destino} ({p['confianza']:.0%}, {p['apoyos']} apoyos)", flush=True)
+            else:
+                con.execute("UPDATE entrada SET propuesta=?, confianza=?, apoyos=?, alternativas=? "
+                            "WHERE id=? AND estado='pendiente'",
+                            (p["propuesta"], p["confianza"], p["apoyos"], alternativas, f["id"]))
+                cambiados += 1
+    print(f"Repaso de pendientes: {len(filas)} mirados, {aprobados} se colocan solos, "
+          f"{cambiados} con propuesta nueva", flush=True)
+    return aprobados
+
+
 def analizar(con, cfg) -> int:
     filas = con.execute("SELECT * FROM entrada WHERE estado='nuevo' ORDER BY id").fetchall()
     if not filas:
@@ -439,25 +516,8 @@ def analizar(con, cfg) -> int:
         # y el mensaje de Telegram con el que llegó (si vino de allí).
         origen_texto = texto_telegram(con, f["nombre"])
         canal = canal_telegram(con, f["nombre"])  # "Warhammer 40000 9°Edicion": dice de qué juego es
-        consulta = " ".join([f["nombre"], r.get("pdf_titulo") or "", origen_texto[:300], canal,
-                             *[p.stem for p in i["pdfs"][:10] if p.name != f["nombre"]]])
-        novela = destino_mapa(f["nombre"], canal) or (None if f["es_carpeta"] else destino_novela(f["nombre"], canal))
-        if novela:
-            p = {"propuesta": novela, "confianza": 1.0, "apoyos": VECINOS, "alternativas": [[novela, 100]]}
-        elif not i["pdfs"] and Path(f["nombre"]).suffix.lower() not in EBOOKS:
-            # Sin PDF (pack de mapas, tokens, música…): se compara con las carpetas de assets,
-            # usando también los nombres de lo que trae dentro.
-            p = packs.proponer(con, " ".join([consulta, *_nombres_dentro(cfg.raiz / f["ruta_actual"])]))
-        else:
-            p = proponer(con, consulta, datos.get("editorial"))
-            p = con_segunda_opinion(p, bayes, rasgos(consulta, datos.get("editorial"), r.get("pdf_titulo")))
-            serie = None if es_seguro(p, cfg.auto) else por_serie(bayes, f["nombre"])
-            if serie:
-                # "DDAL09-06": casi todos los DDAL09 que tenemos están en la misma carpeta.
-                otras = [a for a in p["alternativas"] if a[0] != serie["propuesta"]]
-                p = {**serie, "alternativas": [*serie["alternativas"], *otras][:5]}
-        if f["es_carpeta"]:
-            p = junto_a_sus_hermanas(p, f["nombre"])
+        p = proponer_entrada(con, cfg, bayes, f, i["pdfs"], datos.get("editorial"), r.get("pdf_titulo"),
+                             origen_texto, canal)
         destino = p["propuesta"]
         llm_json = None
         if todo_duplicado:
@@ -658,6 +718,7 @@ def pasada(con, cfg) -> None:
     log = Registro(cfg)
     escanear(con, cfg, log)
     analizar(con, cfg)
+    repasar_pendientes(con, cfg, log)
     ejecutar_aprobados(con, cfg, log)
     ejecutar_borrados(con, cfg, log)
 

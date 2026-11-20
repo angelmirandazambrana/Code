@@ -464,3 +464,28 @@ def test_nombre_no_utf8_de_un_zip():
     assert nombre_legible(raro) == "Война Алой"
     assert nombre_legible("Normal ñ.pdf") is None
     assert nombre_legible(b"Caf\x82.pdf".decode("utf-8", "surrogateescape")) == "Café.pdf"  # cp437
+
+
+def test_repaso_de_pendientes_cuando_cambia_la_biblioteca(entorno, monkeypatch):
+    cfg, con, raiz, entrada = entorno
+    sr = "RPG/Shadowrun/5e (Catalyst, 2013)"
+    _pdf(raiz / "_Inbox/Cosa nueva.pdf", "nada")
+    dudosa = {"propuesta": f"{sr}", "confianza": 0.3, "apoyos": 2, "alternativas": [[sr, 30]]}
+    monkeypatch.setattr(entrada, "proponer", lambda *a, **k: dict(dudosa))
+    monkeypatch.setattr(entrada, "con_segunda_opinion", lambda p, *a: p)
+    monkeypatch.setattr(entrada, "repasar_pendientes", lambda *a, **k: 0)   # aún no
+    entrada.pasada(con, cfg)
+    e = _estado(con, "Cosa nueva.pdf")
+    assert e["estado"] == "pendiente"
+    monkeypatch.undo()
+    # La biblioteca ha cambiado y ahora los vecinos lo tienen claro: el repaso lo aprueba y se mueve.
+    clara = {"propuesta": sr, "confianza": 0.95, "apoyos": 5, "alternativas": [[sr, 95]]}
+    monkeypatch.setattr(entrada, "proponer", lambda *a, **k: dict(clara))
+    monkeypatch.setattr(entrada, "con_segunda_opinion", lambda p, *a: p)
+    monkeypatch.setattr(entrada, "ESTABLE_SEG", -10)
+    entrada._REPASO.clear()
+    entrada.pasada(con, cfg)
+    e = _estado(con, "Cosa nueva.pdf")
+    assert e["estado"] == "movido" and e["auto"] == 1 and (raiz / sr / "Cosa nueva.pdf").is_file()
+    # Sin cambios en la biblioteca no se repite el repaso.
+    assert entrada.repasar_pendientes(con, cfg) == 0
