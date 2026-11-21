@@ -106,7 +106,7 @@
         </p>
         {% if e.origen_texto %}<p class="mensaje-tg" title="Mensaje de Telegram">✈ {{ e.origen_texto|truncate(300) }}</p>{% endif %}
         {% if e.llm %}<p class="claude" title="Lo que dice Claude tras mirar la portada y las primeras páginas">✦ Claude
-          ({{ e.llm.seguridad }}{% if not e.llm.valida %}, carpeta no válida: {{ e.llm.carpeta }}{% endif %}):
+          ({{ e.llm.seguridad }}{% if not e.llm.valida and e.llm.carpeta %}, carpeta no válida: {{ e.llm.carpeta }}{% endif %}):
           {{ e.llm.juego }} · {{ e.llm.tipo }} — {{ e.llm.motivo }}</p>{% endif %}
         {% if e.estado == 'error' %}<p class="aviso">No se pudo procesar: {{ e.nota }}</p>{% endif %}
         {% if e.duplicado_de %}

@@ -58,6 +58,10 @@ services:
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
       LLM_MODELO: "${LLM_MODELO:-sonnet}"
       LLM_MAX_DOLARES_MES: "${LLM_MAX_DOLARES_MES:-10}"
+      # Lectura nocturna por lotes con Haiku de lo que espera en la Entrada (off la apaga).
+      ENTRADA_LOTES: "${ENTRADA_LOTES:-on}"
+      ENTRADA_LOTES_HORA: "${ENTRADA_LOTES_HORA:-3}"
+      ENTRADA_LOTES_BUSQUEDAS_DIA: "${ENTRADA_LOTES_BUSQUEDAS_DIA:-20}"
       TZ: "${TZ:-Europe/Madrid}"
     volumes:
       - "${BIBLIOTECA_HOST}:/biblioteca"      # lectura y ESCRITURA

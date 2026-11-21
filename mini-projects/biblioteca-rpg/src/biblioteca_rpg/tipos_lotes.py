@@ -110,7 +110,7 @@ def recoger(con, cfg, de_verdad: bool) -> None:
     estado = json.loads(estado_f.read_text())
     cliente = anthropic.Anthropic()
     con.executescript(ESQUEMA_USO)
-    registro = cfg.raiz / "_Reorganizacion" / f"tipos_haiku_{time.strftime('%Y-%m-%d_%H%M')}.csv"
+    registro = cfg.raiz / "_Reorganizacion" / f"tipos_haiku_{time.strftime('%Y-%m-%d_%H%M%S')}.csv"
     movidos = dudosos = 0
     gasto = 0.0
     filas_log = []

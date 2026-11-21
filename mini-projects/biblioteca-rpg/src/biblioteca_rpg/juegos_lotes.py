@@ -18,8 +18,8 @@ import base64
 import json
 import re
 import sys
-import unicodedata
 import time
+import unicodedata
 from collections import Counter
 
 from . import config as config_mod
@@ -232,13 +232,21 @@ def _nuevos(respuestas: dict, juegos: dict | None = None) -> dict[str, dict]:
 
 
 def verificar(con, cfg, maximo: int) -> None:
-    """Una búsqueda web por juego nuevo: ¿existe? ¿cómo se llama de verdad? ¿quién lo publica?"""
+    nuevos = _nuevos(_leer(cfg, RESPUESTAS, {}), catalogo_juegos(con)[1])
+    verificar_nuevos(con, cfg, nuevos, maximo)
+
+
+def verificar_nuevos(con, cfg, nuevos: dict[str, dict], maximo: int, etiqueta: str = "web, juegos") -> int:
+    """Una búsqueda web por juego nuevo: ¿existe? ¿cómo se llama de verdad? ¿quién lo publica?
+
+    Los ya comprobados (en esta oleada o en otra) no se vuelven a buscar. Devuelve cuántos se buscan."""
     import anthropic
     cliente = anthropic.Anthropic()
     con.executescript(ESQUEMA_USO)
     verificados = _leer(cfg, VERIFICADOS, {})
-    nuevos = _nuevos(_leer(cfg, RESPUESTAS, {}), catalogo_juegos(con)[1])
     faltan = sorted((n for n in nuevos if n not in verificados), key=lambda n: -nuevos[n]["n"])[:maximo]
+    if not faltan:
+        return 0
     print(f"Juegos nuevos: {len(nuevos)}; ya comprobados {len(verificados)}; ahora {len(faltan)}")
     esquema = {"type": "object", "additionalProperties": False,
                "required": ["existe", "nombre_oficial", "editorial", "tipo_juego"],
@@ -255,7 +263,7 @@ def verificar(con, cfg, maximo: int) -> None:
                            f"¿Existe un juego de rol o wargame de mesa llamado «{nombre}» (editorial probable: "
                            f"{nuevos[nombre]['editorial'] or '?'})? Busca en la web. existe=true solo si es un juego "
                            f"publicado (también autoeditado o en DriveThruRPG/itch.io) y no un suplemento de otro "
-                           f"juego. nombre_oficial: el nombre del juego, sin versión. tipo_juego='ninguno' si es "
+                           f"juego. nombre_oficial: el nombre del juego, sin versión. editorial: solo su nombre, sin aclaraciones. tipo_juego='ninguno' si es "
                            f"material genérico para cualquier sistema."}],
                 output_config={"effort": "low", "format": {"type": "json_schema", "schema": esquema}})
         except anthropic.APIError as ex:
@@ -275,9 +283,10 @@ def verificar(con, cfg, maximo: int) -> None:
     _guardar(cfg, VERIFICADOS, verificados)
     with con:
         con.execute("INSERT INTO llm_uso (fecha, modelo, entrada_id, tokens_entrada, tokens_salida, dolares) "
-                    "VALUES (?, ?, NULL, NULL, NULL, ?)", (int(time.time()), MODELO + " (web, juegos)", gasto))
+                    "VALUES (?, ?, NULL, NULL, NULL, ?)", (int(time.time()), f"{MODELO} ({etiqueta})", gasto))
     si = sum(1 for n in faltan if verificados.get(n, {}).get("existe"))
-    print(f"Comprobados {len(faltan)}: existen {si}. Gasto {gasto:.2f} $")
+    print(f"Comprobados {len(faltan)}: existen {si}. Gasto {gasto:.2f} $", flush=True)
+    return len(faltan)
 
 
 # Cómo llama Haiku a veces a juegos que en la biblioteca tienen otro nombre.
@@ -285,12 +294,31 @@ ALIAS_JUEGO = {
     "Dungeons & Dragons": "D&D", "Advanced Dungeons & Dragons": "D&D", "AD&D": "D&D", "5e": "D&D",
     "Dungeons & Dragons 5e": "D&D", "D&D 5e": "D&D", "B/X": "D&D", "Sword & Wizardry": "Swords & Wizardry",
     "Heavy Gear Blitz!": "Heavy Gear", "Heavy Gear Blitz": "Heavy Gear",
+    # Mundos de D&D: en la biblioteca van dentro de D&D.
+    "Dungeon & Dragons": "D&D", "Ravenloft": "D&D", "Eberron": "D&D", "Spelljammer": "D&D",
+    "Planescape": "D&D", "Waterdeep": "D&D", "Forgotten Realms": "D&D", "Dragonlance": "D&D",
+    "Greyhawk": "D&D", "Dark Sun": "D&D", "Mystara": "D&D",
+    "Cyberpunk RED": "Cyberpunk", "Cyberpunk 2020": "Cyberpunk", "Legend of the Five Rings": "L5R",
+    "Warhammer 40,000 Roleplay": "Warhammer 40K Roleplay",
+    "Warhammer 40,000": "Games Workshop/Warhammer 40K", "Warhammer 40k": "Games Workshop/Warhammer 40K",
+    "Warhammer 40K": "Games Workshop/Warhammer 40K",
+    "Warhammer Fantasy Battle": "Games Workshop/Warhammer Fantasy",
+    "Warhammer Fantasy Battles": "Games Workshop/Warhammer Fantasy",
+    "Warhammer The Horus Heresy": "Games Workshop/Warhammer - The Horus Heresy",
+    "Warhammer: The Horus Heresy": "Games Workshop/Warhammer - The Horus Heresy",
+    "Blood Red Skies": "Warlord Games/Blood Red Skies", "Pulp Alley": "Other Publishers/Pulp Alley 2e",
+    "Magnagothica: Maleghast": "Other Publishers/Magnagothica - Maleghast 666",
 }
 
 
 def _limpio(nombre: str) -> str:
     """Nombre de carpeta: sin barras ni caracteres que Windows no acepta."""
     return re.sub(r'[\\/:*?"<>|]+', " -", nombre).strip(" .")
+
+
+def _corto(nombre: str, comas: bool = False) -> str:
+    """Sin las aclaraciones que a veces añade la búsqueda web: «Strato Minis (original; adquirida…)»."""
+    return re.split(r"\s*[(;,]" if comas else r"\s*[(;]", nombre or "", maxsplit=1)[0].strip()
 
 
 def destino(d, r: dict, juegos: dict, verificados: dict) -> tuple[str | None, str]:
@@ -308,10 +336,10 @@ def destino(d, r: dict, juegos: dict, verificados: dict) -> tuple[str | None, st
     ya = _existente(r["juego"], juegos) or (_existente(oficial, juegos) if oficial else None)
     if ya:
         r = {**r, "en_lista": True, "juego": ya}
+    if r.get("en_lista") and r["juego"] not in juegos:
+        r = {**r, "en_lista": False}  # dice que está pero no: se trata como nuevo (a comprobar en la web)
     if r.get("en_lista"):
-        j = juegos.get(r["juego"])
-        if not j:
-            return None, f"juego «{r['juego']}» no está en la lista"
+        j = juegos[r["juego"]]
         es_war = j["base"].startswith("Wargames/")
         if es_war and tipo not in TIPOS_WAR:
             tipo = {"Core Rules": "Rules", "Adventures": "Scenarios & Campaigns", "Settings": "Background"}.get(tipo, "Misc")
@@ -327,11 +355,11 @@ def destino(d, r: dict, juegos: dict, verificados: dict) -> tuple[str | None, st
     v = verificados.get(r["juego"].strip())
     if not v or not v.get("existe") or v.get("tipo_juego") == NINGUNO:
         return None, "juego nuevo sin comprobar o que no existe"
-    nombre = _limpio(v["nombre_oficial"] or r["juego"])
+    nombre = _limpio(_corto(v["nombre_oficial"]) or r["juego"])
     if v["tipo_juego"] == "wargame":
         if tipo not in TIPOS_WAR:
             tipo = {"Core Rules": "Rules", "Adventures": "Scenarios & Campaigns", "Settings": "Background"}.get(tipo, "Misc")
-        ed = _limpio(v.get("editorial") or "") or OTRAS
+        ed = _limpio(_corto(v.get("editorial") or "", comas=True)) or OTRAS
         return f"Wargames/{ed}/{nombre}/{tipo}", "juego nuevo comprobado en la web"
     if tipo not in TIPOS_ROL:
         tipo = {"Rules": "Core Rules", "Army Books": "Supplements", "Scenarios & Campaigns": "Adventures"}.get(tipo, "Misc")

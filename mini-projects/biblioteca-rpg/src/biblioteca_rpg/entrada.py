@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 
 from . import config as config_mod
-from . import llm, packs, texto_pdf
+from . import entrada_lotes, llm, packs, texto_pdf
 from .clasificador import (
     VECINOS,
     Bayes,
@@ -428,6 +428,15 @@ def proponer_entrada(con, cfg, bayes, f, pdfs: list, editorial, pdf_titulo, orig
     return p
 
 
+def con_claude(alternativas: list, llm_json: str | None) -> list:
+    """Las alternativas, con la carpeta que propuso Claude (si la hay y vale) la primera."""
+    claude = json.loads(llm_json) if llm_json else {}
+    if not (claude.get("valida") and claude.get("carpeta")):
+        return alternativas
+    otras = [a for a in alternativas if a[0] != claude["carpeta"] and a[1] is not None]
+    return [[claude["carpeta"], None], *otras][:6]
+
+
 _REPASO: dict = {}
 REPASO_CADA = 600  # segundos: como mucho un repaso cada 10 minutos
 
@@ -458,7 +467,7 @@ def repasar_pendientes(con, cfg, log: "Registro | None" = None, forzar: bool = F
         if not p.get("propuesta"):
             continue
         destino = p["propuesta"] if es_seguro(p, cfg.auto) else madre_segura(p, cfg.auto)
-        alternativas = json.dumps(p["alternativas"], ensure_ascii=False)
+        alternativas = json.dumps(con_claude(p["alternativas"], f["llm"]), ensure_ascii=False)
         if not destino and p["propuesta"] == f["propuesta"] and alternativas == f["alternativas"]:
             continue
         with con:
@@ -724,6 +733,7 @@ def pasada(con, cfg) -> None:
     escanear(con, cfg, log)
     analizar(con, cfg)
     repasar_pendientes(con, cfg, log)
+    entrada_lotes.automatico(con, cfg)
     ejecutar_aprobados(con, cfg, log)
     ejecutar_borrados(con, cfg, log)
 

@@ -370,7 +370,7 @@ def ejecutar_plan(con, cfg, etiqueta: str, plan: list[tuple[str, str, str]], bas
             print(f"  carpeta: {o}  ->  {d}")
         print("Ensayo: no se ha movido nada (añade --ejecutar).")
         return None
-    registro = cfg.raiz / "_Reorganizacion" / f"esquema_{etiqueta}_{time.strftime('%Y-%m-%d_%H%M')}.csv"
+    registro = cfg.raiz / "_Reorganizacion" / f"esquema_{etiqueta}_{time.strftime('%Y-%m-%d_%H%M%S')}.csv"
     registro.parent.mkdir(parents=True, exist_ok=True)
     errores = 0
     with open(registro, "w", encoding="utf-8-sig", newline="") as f:

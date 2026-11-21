@@ -346,7 +346,11 @@ def agrupar_pendientes(pendientes: list[dict], minimo: int = 2, comprobar: bool 
     for e in pendientes:
         if e["estado"] != "pendiente":
             continue
-        if e.get("propuesta") and (not comprobar or encaja(e, e["propuesta"])):
+        claude = e.get("llm") or {}
+        if claude.get("valida") and claude.get("carpeta"):
+            # Claude ha mirado el libro: su carpeta manda para agrupar.
+            por.setdefault(claude["carpeta"], []).append(e)
+        elif e.get("propuesta") and (not comprobar or encaja(e, e["propuesta"])):
             por.setdefault(e["propuesta"], []).append(e)
         elif comprobar:
             from .clasificador import palabras

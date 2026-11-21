@@ -56,3 +56,25 @@ def test_alias_de_dnd():
     juegos = {**JUEGOS, "D&D": {"base": "RPG/D&D", "ediciones": ["5e (Wizards of the Coast, 2014)"]}}
     assert destino(None, r(juego="Dungeons & Dragons", edicion="5e (Wizards of the Coast, 2014)"), juegos, {})[0] == \
         "RPG/D&D/5e (Wizards of the Coast, 2014)/Adventures"
+
+
+def test_dice_que_esta_en_la_lista_pero_no():
+    juegos = {**JUEGOS, "Games Workshop/Warhammer 40K": {"base": "Wargames/Games Workshop/Warhammer 40K", "ediciones": []}}
+    assert destino(None, r(juego="Warhammer 40,000", tipo_juego="wargame", tipo="Rules"), juegos, {})[0] == \
+        "Wargames/Games Workshop/Warhammer 40K/Rules"
+    assert destino(None, r(juego="Ravenloft"), {**juegos, "D&D": {"base": "RPG/D&D", "ediciones": []}}, {})[0] == \
+        "RPG/D&D/Adventures"
+    # Un juego «de la lista» que no está: como nuevo, solo si la web dice que existe.
+    assert destino(None, r(juego="Pike & Shotte"), juegos, {})[0] is None
+    v = {"Pike & Shotte": {"existe": True, "nombre_oficial": "Pike & Shotte", "editorial": "Warlord Games",
+                           "tipo_juego": "wargame"}}
+    assert destino(None, r(juego="Pike & Shotte", tipo="Rules"), juegos, v)[0] == "Wargames/Warlord Games/Pike & Shotte/Rules"
+
+
+def test_editorial_y_nombre_sin_aclaraciones():
+    v = {"Hardwar": {"existe": True, "nombre_oficial": "Hardwar (2nd edition)", "tipo_juego": "wargame",
+                     "editorial": "Strato Minis Studio (original; adquirida por Modiphius en 2024)"},
+         "Cosa": {"existe": True, "nombre_oficial": "Cosa", "tipo_juego": "wargame", "editorial": "LPS, Inc"}}
+    assert destino(None, r(juego="Hardwar", en_lista=False, tipo="Rules"), JUEGOS, v)[0] == \
+        "Wargames/Strato Minis Studio/Hardwar/Rules"
+    assert destino(None, r(juego="Cosa", en_lista=False, tipo="Rules"), JUEGOS, v)[0] == "Wargames/LPS/Cosa/Rules"
