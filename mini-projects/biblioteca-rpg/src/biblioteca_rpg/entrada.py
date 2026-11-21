@@ -113,6 +113,9 @@ REGLAS_MAPAS = [
     (re.compile(r"starfinder.*flip|flip.*starfinder", re.I), FLIP_SF),
     (re.compile(r"flip[\s_-]*tiles?", re.I), FLIP_PF + "/Flip-Tiles"),
     (re.compile(r"flip[\s_-]*ma[pt]s?(?![a-z])", re.I), FLIP_PF + "/Flip-Mats"),
+    # Map Packs de Paizo: "GameMastery Map Pack - Village", "Map Pack - Graveyard".
+    (re.compile(r"(paizo|pzo\d|gamemastery|pathfinder)[^a-z]*.*map[\s_-]*pack|^map[\s_-]*pack\s*-\s", re.I),
+     FLIP_PF + "/Map Packs"),
 ]
 
 

@@ -301,6 +301,8 @@ def test_flip_mats_van_con_su_juego():
     assert destino_mapa("Starfinder Flip-Mat - Asteroid.pdf") == FLIP_SF
     assert destino_mapa("Flip-Mat - Basic Starfield.pdf", "Starfinder Society") == FLIP_SF
     assert destino_mapa("Flipmatic Adventures.pdf") is None
+    assert destino_mapa("Map Pack - Graveyard.pdf") == FLIP_PF + "/Map Packs"
+    assert destino_mapa("Gamemastery - Map Pack - Village.pdf") == FLIP_PF + "/Map Packs"
     assert FLIP_PF == "RPG/Pathfinder/Any Edition/Game Aids" and FLIP_SF == "RPG/Starfinder/Game Aids/Flip-Mats"
 
 

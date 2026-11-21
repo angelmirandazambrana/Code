@@ -33,7 +33,7 @@ from pathlib import Path
 
 from . import config as config_mod
 from .db import conectar
-from .entrada import COMPRIMIDOS_HECHOS, _libre
+from .entrada import COMPRIMIDOS_HECHOS, _libre, destino_mapa
 from .texto_pdf import normalizar
 
 ESTADOS_TENIDOS = ("descargado", "ya_en_biblioteca", "ya_en_entrada", "repetido")
@@ -105,6 +105,38 @@ def nombre_seguro(nombre: str | None, msg_id: int, ext: str = "") -> str:
 
 # --- ¿Descargar? ------------------------------------------------------------------
 
+# Mapas: no se descargan (la biblioteca ya no guarda battlemaps ni packs de mapas), salvo los
+# Flip-Mats / Flip-Tiles de Paizo. Papercraft y Foundry sí interesan.
+RE_MAPA_FUERTE = re.compile(
+    r"battle[\s_-]*(maps?|mats?)|map[\s_-]*packs?|\bmap[\s_-]*tiles?|dungeon[\s_-]*tiles?|\bgeomorphs?\b"
+    r"|dungeondraft|wonderdraft|inkarnate|dungeon[\s_-]*alchemist|\bgrid(ded|less)\b|\b\d{2}\s*x\s*\d{2}\b"
+    r"|czepeku|\bloke\b|tom[\s_-]*cartos|forgotten[\s_-]*adventures|\bbattle[\s_-]*grids?\b"
+    r"|\b(vtt|roll20)[\s_-]*(maps?|assets?)\b", re.I)
+# "tokens" solo en comprimidos: un PDF de tokens suele ser un componente del juego (Necromunda, WFRP).
+RE_TOKENS = re.compile(r"\btokens?\b", re.I)
+RE_MAPA_NOMBRE = re.compile(r"(?<!no )(?<![a-z])(maps?|mapas?|tiles)(?![a-z])", re.I)
+RE_SI_INTERESA = re.compile(r"paper[\s_-]*(craft|minis?|models?|terrain)|papercraft|card[\s_-]*stock|fold[\s_-]*up"
+                            r"|\bfoundry\b|\bfvtt\b", re.I)
+# Cualquier mapa de Paizo (Pathfinder, Starfinder) sí interesa: "PF2 ... Interactive Maps".
+RE_PAIZO = re.compile(r"\b(paizo|pathfinder|starfinder|pf[12]e?|sf[12]e?|pzo\d+)\b", re.I)
+# Map Packs de Paizo (GameMastery, Pathfinder, Starfinder): "Map Pack - Graveyard.pdf".
+RE_MAP_PACK_PAIZO = re.compile(r"(paizo|pzo\d|gamemastery|pathfinder|starfinder)[^a-z]*.*map[\s_-]*pack"
+                               r"|^map[\s_-]*pack\s*-\s", re.I)
+
+
+def es_mapa(nombre: str, texto: str = "", canal: str = "") -> bool:
+    """¿Es un mapa de los que no queremos? (Flip-Mats y Map Packs de Paizo, papercraft y Foundry, sí)."""
+    base = os.path.splitext(nombre)[0].replace("_", " ").strip()
+    if destino_mapa(nombre, canal) or RE_MAP_PACK_PAIZO.search(base) or RE_PAIZO.search(base):
+        return False
+    if RE_SI_INTERESA.search(f"{nombre} {texto[:400]}"):
+        return False
+    comprimido = os.path.splitext(nombre)[1].lower() in (".zip", ".rar", ".7z")
+    leyenda = texto[:400].replace("_", " ") if comprimido else ""  # en un PDF, el mensaje no cuenta
+    return bool(RE_MAPA_FUERTE.search(base) or RE_MAPA_FUERTE.search(leyenda) or RE_MAPA_NOMBRE.search(base)
+                or (comprimido and RE_TOKENS.search(base)))
+
+
 def decidir(con, cfg, aj: Ajustes, a: Adjunto) -> tuple[str, int | None, str]:
     """('descargar' | 'ignorado' | 'repetido' | 'ya_en_biblioteca' | 'ya_en_entrada', doc_id, nota)."""
     ext = os.path.splitext(a.nombre)[1].lower()
@@ -112,6 +144,8 @@ def decidir(con, cfg, aj: Ajustes, a: Adjunto) -> tuple[str, int | None, str]:
         return "ignorado", None, f"tipo {ext or 'sin extensión'}"
     if a.tamano > aj.max_mb * 1024 * 1024:
         return "ignorado", None, f"más de {aj.max_mb} MB"
+    if es_mapa(a.nombre, a.texto, a.canal):
+        return "ignorado", None, "mapa (solo se bajan los Flip-Mats de Paizo)"
 
     if a.tg_doc_id:
         f = con.execute(f"SELECT canal, msg_id FROM telegram_msgs WHERE tg_doc_id=? AND estado IN "

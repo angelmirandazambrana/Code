@@ -192,3 +192,30 @@ def test_grandes_se_dejan_para_luego_y_freno_por_disco(entorno, monkeypatch):
     with pytest.raises(tg.SinEspacio):
         asyncio.run(tg.revisar_canal(cliente, con, cfg, sin_sitio, "@canal"))
     assert not (raiz / "_Inbox/Otro.pdf").exists()
+
+
+def test_mapas_fuera_salvo_paizo_papercraft_y_foundry():
+    from biblioteca_rpg.telegram import es_mapa
+    # Fuera
+    assert es_mapa("Czepeku Maps Pack 12.zip")
+    assert es_mapa("Ancient_Ruins_Battlemap_30x40.zip")
+    assert es_mapa("Forest Map Pack Vol 2.7z")
+    assert es_mapa("Dungeon Tiles - Sewers.pdf")
+    assert es_mapa("Token Pack Undead.zip")
+    assert es_mapa("Lost Mine of Phandelver Roll20 Assets.zip")
+    assert es_mapa("Tavern.zip", "Gridded and gridless versions included")
+    assert es_mapa("Curse of Strahd - Maps.pdf")
+    # Dentro
+    assert not es_mapa("Pathfinder Flip-Mat - Bigger Dungeon.pdf")
+    assert not es_mapa("Starfinder Flip-Mat - Space Station.pdf")
+    assert not es_mapa("Flip-Tiles - Dungeon Starter Set.pdf")
+    assert not es_mapa("Dave Graffam Models - Tavern Papercraft.zip")
+    assert not es_mapa("Tomb of Annihilation - Foundry VTT module.zip")
+    assert not es_mapa("Curse of Strahd.pdf")
+    assert not es_mapa("Player's Handbook 2024.pdf", "Includes maps of the Forgotten Realms")
+    assert not es_mapa("Mapmaker's Guide to Worldbuilding.pdf")
+    assert not es_mapa("Map Pack - Graveyard.pdf") and not es_mapa("Gamemastery - Map Pack - Village.pdf")
+    assert not es_mapa("A Night of Fright.pdf", "Adventure with battle maps, gridded and gridless")
+    assert not es_mapa("l'avventura di olidrammara no map.pdf")
+    assert not es_mapa("Necromunda - Tokens -25-01-2019.pdf")
+    assert not es_mapa("PF2_The_Resurrection_Flood_Interactive_Maps_Triumph_of_The_Tust.pdf")
