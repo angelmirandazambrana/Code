@@ -59,6 +59,7 @@ def pasada_pdf(con, cfg, limite: int | None = None, solo: list[str] | None = Non
     if not filas:
         return {"leidos": 0}
     nombres = {f["id"]: f["nombre"] for f in filas}
+    rutas = {f["id"]: f["ruta"] for f in filas}
     conocidas = [r[0] for r in con.execute("SELECT DISTINCT editorial FROM docs WHERE editorial IS NOT NULL")]
     dicc = texto_pdf.diccionario_editoriales(conocidas)
     total = len(filas)
@@ -85,7 +86,7 @@ def pasada_pdf(con, cfg, limite: int | None = None, solo: list[str] | None = Non
             lote.append((doc_id, "sin_resultado", 0.0, geek_mod.a_json({"error": str(error)[:300]}), ahora))
         else:
             cuenta["leidos"] += 1
-            datos = texto_pdf.extraer(res["lineas"], nombres[doc_id], dicc)
+            datos = texto_pdf.extraer(res["lineas"], nombres[doc_id], dicc, ruta=rutas[doc_id])
             if res["caracteres"] < 200:
                 cuenta["sin_texto"] += 1
                 datos["sin_texto"] = True
@@ -270,7 +271,7 @@ def _efectivos(extras: dict, nombre: str = "", ruta: str = "") -> dict:
         v["publicado"], origen["publicado"] = anio_del_nombre(nombre, ruta), "nombre"
     if g.get("editoriales"):
         v["ext_editorial"], origen["editorial"] = g["editoriales"][0], "geek"
-    elif pdf.get("editorial"):
+    elif pdf.get("editorial") and (pdf["editorial"] != "Wizards of the Coast" or texto_pdf.es_de_wotc(ruta)):
         v["ext_editorial"], origen["editorial"] = pdf["editorial"], "pdf"
     if g.get("autores"):
         v["autores"], origen["autores"] = ", ".join(g["autores"][:6]), "geek"

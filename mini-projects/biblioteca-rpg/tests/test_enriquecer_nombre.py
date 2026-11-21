@@ -31,3 +31,31 @@ def test_codigos_y_usuarios_no_son_anios():
     assert anio_del_nombre("Bloody_Awful_(MACE_2013)_WhiteBG.pdf") == 2013
     assert anio_del_nombre("Pacesetter 2005 - Chill 1st ed - Things.pdf") is None
     assert anio_del_nombre("MoveCards_PnP_Singles_August2016.pdf") == 2016
+
+
+def test_wotc_solo_en_sus_lineas():
+    from biblioteca_rpg.texto_pdf import diccionario_editoriales, extraer
+    dicc = diccionario_editoriales(["Wizards of the Coast", "Kobold Press"])
+    pie = "©2016 Wizards of the Coast LLC, PO Box 707, Renton, WA 98057-0707, USA.\n"
+    ogl = "System Reference Document 5.1 Copyright 2016, Wizards of the Coast, Inc.\nCopyright 2018 Kobold Press\n"
+    assert extraer(pie, "x.pdf", dicc, ruta="RPG/D&D 3rd Party/5e (2014)/Adventures/x.pdf") == {}
+    assert extraer(pie, "x.pdf", dicc, ruta="RPG/D&D/5e (Wizards of the Coast, 2014)/Core Rules/x.pdf") == \
+        {"publicado": 2016, "editorial": "Wizards of the Coast"}
+    assert extraer(ogl, "x.pdf", dicc, ruta="RPG/D&D 3rd Party/5e (2014)/x.pdf") == \
+        {"publicado": 2018, "editorial": "Kobold Press"}
+    assert _efectivos({"pdf": {"editorial": "Wizards of the Coast"}}, "x.pdf",
+                      "RPG/D&D 3rd Party/5e (2014)/x.pdf")["ext_editorial"] is None
+
+
+def test_el_anio_de_la_ogl_no_es_el_del_libro():
+    from biblioteca_rpg.texto_pdf import diccionario_editoriales, extraer
+    dicc = diccionario_editoriales(["Kobold Press"])
+    ogl = "Open Game License v 1.0a Copyright 2000,\nWizards of the Coast, LLC.\n"
+    assert extraer(ogl, "x.pdf", dicc, ruta="RPG/D&D 3rd Party/5e (2014)/x.pdf") == {}
+
+
+def test_wotc_partido_entre_lineas():
+    from biblioteca_rpg.texto_pdf import diccionario_editoriales, extraer
+    dicc = diccionario_editoriales(["Kobold Press"])
+    for texto in ("the Coast, Inc. and is Copyright 2000 Wizards of\n", "Copyright 2000, Wiz-\n"):
+        assert extraer(texto, "x.pdf", dicc, ruta="RPG/D&D 3rd Party/5e (2014)/x.pdf") == {}

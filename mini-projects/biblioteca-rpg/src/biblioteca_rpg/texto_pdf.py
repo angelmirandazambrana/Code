@@ -139,23 +139,44 @@ def _buscar_editorial(texto: str, dicc: list[tuple[str, str]]) -> str | None:
     return None
 
 
-def extraer(texto: str, nombre: str, dicc: list[tuple[str, str]], anio_max: int | None = None) -> dict:
+# Las líneas que publica Wizards of the Coast. Fuera de ellas, su copyright es el de la OGL, el SRD o
+# el pie fijo de la DMs Guild («©2016 Wizards of the Coast LLC, PO Box 707…»): ni su año ni su nombre
+# son los del libro.
+LINEAS_WOTC = re.compile(r"^(RPG/(D&D|d20 Modern|Star Wars[^/]*|Gamma World|Alternity|L5R|Legend of the Five Rings)|"
+                         r"Magazines/(Dragon|Dungeon|Polyhedron)[^/]*)(/|$)")
+# También partido entre líneas: «Copyright 2000 Wizards of» / «Copyright 2000, Wiz-».
+RE_WOTC = re.compile(r"wizards\W+of\b|\bwiz-\s*$|\bcoast,?\s+(inc|llc)\b|\bwotc\b", re.I | re.M)
+# La OGL y el SRD (aunque «Wizards» caiga en la línea siguiente): su año es el de la licencia.
+RE_OGL = re.compile(r"open game licen[cs]e|system reference document|\bSRD\b", re.I)
+
+
+def es_de_wotc(ruta: str | None) -> bool:
+    """¿Puede ser de Wizards of the Coast? (Sin ruta, no se sabe: sí.)"""
+    return not ruta or bool(LINEAS_WOTC.match(ruta))
+
+
+def extraer(texto: str, nombre: str, dicc: list[tuple[str, str]], anio_max: int | None = None,
+            ruta: str | None = None) -> dict:
     """Devuelve {'publicado', 'editorial', 'isbn'} con lo que se pueda deducir (o vacío)."""
     anio_max = anio_max or time.localtime().tm_year
+    wotc = es_de_wotc(ruta)
     declaraciones = []  # (año más reciente, texto que sigue, es_licencia)
+
+    def anotar(anio, resto, inicio_match, fin_match):
+        inicio = texto.rfind("\n", 0, inicio_match) + 1
+        linea = texto[inicio:fin_match]
+        if not wotc and (RE_WOTC.search(linea) or RE_OGL.search(linea)):
+            return
+        declaraciones.append((anio, resto, bool(RE_LICENCIA.search(linea))))
+
     for m in RE_COPYRIGHT.finditer(texto):
         anios = [int(a) for a in RE_ANIO.findall(m.group(1)) if int(a) <= anio_max]
-        if not anios:
-            continue
-        inicio = texto.rfind("\n", 0, m.start()) + 1
-        linea = texto[inicio:m.end()]
-        declaraciones.append((max(anios), m.group(2), bool(RE_LICENCIA.search(linea))))
+        if anios:
+            anotar(max(anios), m.group(2), m.start(), m.end())
     for m in RE_COPYRIGHT_INV.finditer(texto):
         anio = int(m.group(2))
         if anio <= anio_max:
-            inicio = texto.rfind("\n", 0, m.start()) + 1
-            linea = texto[inicio:m.end()]
-            declaraciones.append((anio, m.group(1), bool(RE_LICENCIA.search(linea))))
+            anotar(anio, m.group(1), m.start(), m.end())
 
     res: dict = {}
     if declaraciones:
