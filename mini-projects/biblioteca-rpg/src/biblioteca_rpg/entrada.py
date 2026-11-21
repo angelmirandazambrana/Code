@@ -428,6 +428,20 @@ def proponer_entrada(con, cfg, bayes, f, pdfs: list, editorial, pdf_titulo, orig
     return p
 
 
+def producto_ajeno(con, carpeta: str) -> bool:
+    """¿Es la carpeta (o está dentro de) otro producto que llegó como carpeta por la Entrada?
+
+    Un starter set de Fria Ligan se parece mucho a otro starter set de Fria Ligan, pero no va dentro
+    de él: eso no se decide nunca solo."""
+    for ruta, nombre, nuevo in con.execute(
+            "SELECT ruta_actual, nombre, nuevo_nombre FROM entrada WHERE es_carpeta=1 AND estado='movido' AND "
+            "(ruta_actual = ? OR substr(?, 1, length(ruta_actual) + 1) = ruta_actual || '/')", (carpeta, carpeta)):
+        # Solo si sigue siendo su propia carpeta (no la de tipo o de juego con la que se fusionó).
+        if ruta.rsplit("/", 1)[-1] in (nombre, nuevo):
+            return True
+    return False
+
+
 def con_claude(alternativas: list, llm_json: str | None) -> list:
     """Las alternativas, con la carpeta que propuso Claude (si la hay y vale) la primera."""
     claude = json.loads(llm_json) if llm_json else {}
@@ -467,6 +481,8 @@ def repasar_pendientes(con, cfg, log: "Registro | None" = None, forzar: bool = F
         if not p.get("propuesta"):
             continue
         destino = p["propuesta"] if es_seguro(p, cfg.auto) else madre_segura(p, cfg.auto)
+        if destino and producto_ajeno(con, destino):
+            destino = None
         alternativas = json.dumps(con_claude(p["alternativas"], f["llm"]), ensure_ascii=False)
         if not destino and p["propuesta"] == f["propuesta"] and alternativas == f["alternativas"]:
             continue
@@ -536,9 +552,9 @@ def analizar(con, cfg) -> int:
         llm_json = None
         if todo_duplicado:
             estado, auto, destino = ("aprobado", 1, DUPLICADOS) if cfg.auto else ("pendiente", 0, DUPLICADOS)
-        elif es_seguro(p, cfg.auto):
+        elif es_seguro(p, cfg.auto) and not producto_ajeno(con, p["propuesta"]):
             estado, auto = "aprobado", 1
-        elif madre_segura(p, cfg.auto):
+        elif madre_segura(p, cfg.auto) and not producto_ajeno(con, madre_segura(p, cfg.auto)):
             # Se sabe el juego pero no la subcarpeta: a "<juego>/_Por clasificar".
             estado, auto, destino = "aprobado", 1, madre_segura(p, cfg.auto)
         else:

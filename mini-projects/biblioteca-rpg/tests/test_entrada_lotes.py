@@ -82,3 +82,23 @@ def test_colocar(tmp_path, monkeypatch):
     assert b["estado"] == "pendiente" and b["destino"] is None
     assert json.loads(b["alternativas"])[0] == ["RPG/Cairn/Adventures", None]
     assert json.loads(b["llm"])["valida"] is True
+
+
+def test_no_se_mete_solo_dentro_de_otro_producto(tmp_path, monkeypatch):
+    monkeypatch.setenv("BIBLIOTECA_RAIZ", str(tmp_path / "biblio"))
+    monkeypatch.setenv("BIBLIOTECA_DATOS", str(tmp_path / "datos"))
+    (tmp_path / "biblio").mkdir()
+    from biblioteca_rpg import config, db
+    from biblioteca_rpg.entrada import producto_ajeno
+    con = db.conectar(config.cargar().db)
+    with con:
+        con.execute("INSERT INTO entrada (nombre, ruta_actual, es_carpeta, estado) VALUES "
+                    "('TOR_Starter_Set', 'RPG/The One Ring/Core Rules/TOR_Starter_Set', 1, 'movido')")
+        # Una carpeta que se fusionó con la de tipo no la convierte en «producto».
+        con.execute("INSERT INTO entrada (nombre, ruta_actual, es_carpeta, estado) VALUES "
+                    "('arcane unleashed', 'RPG/D&D/5e/Core Rules', 1, 'movido')")
+    assert not producto_ajeno(con, "RPG/D&D/5e/Core Rules")
+    assert producto_ajeno(con, "RPG/The One Ring/Core Rules/TOR_Starter_Set")
+    assert producto_ajeno(con, "RPG/The One Ring/Core Rules/TOR_Starter_Set/Maps")
+    assert not producto_ajeno(con, "RPG/The One Ring/Core Rules")
+    assert not producto_ajeno(con, "RPG/The One Ring/Core Rules/TOR_Starter_Set 2")
