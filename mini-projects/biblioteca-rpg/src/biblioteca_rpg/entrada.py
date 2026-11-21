@@ -106,11 +106,13 @@ def destino_novela(nombre: str, canal: str) -> str | None:
 
 
 # Mapas de Paizo: van a assets, a la carpeta de su tipo (el nombre lo dice siempre).
-PAIZO = "assets/By Artist or Source/Paizo"
+# Los Flip-Mats y Flip-Tiles de Paizo van con su juego, como ayudas de juego (assets ya no guarda mapas).
+FLIP_PF = "RPG/Pathfinder/Any Edition/Game Aids"
+FLIP_SF = "RPG/Starfinder/Game Aids/Flip-Mats"
 REGLAS_MAPAS = [
-    (re.compile(r"starfinder.*flip|flip.*starfinder", re.I), PAIZO + "/Starfinder/Flip-Mats"),
-    (re.compile(r"flip[\s_-]*tiles?", re.I), PAIZO + "/Pathfinder/Flip-Tiles"),
-    (re.compile(r"flip[\s_-]*ma[pt]s?(?![a-z])", re.I), PAIZO + "/Pathfinder/Flip Mats"),
+    (re.compile(r"starfinder.*flip|flip.*starfinder", re.I), FLIP_SF),
+    (re.compile(r"flip[\s_-]*tiles?", re.I), FLIP_PF + "/Flip-Tiles"),
+    (re.compile(r"flip[\s_-]*ma[pt]s?(?![a-z])", re.I), FLIP_PF + "/Flip-Mats"),
 ]
 
 
@@ -119,8 +121,8 @@ def destino_mapa(nombre: str, canal: str = "") -> str | None:
     for patron, carpeta in REGLAS_MAPAS:
         if patron.search(nombre):
             # "Flip-Mat" a secas: si llegó de un canal de Starfinder, es de Starfinder.
-            if carpeta.endswith("/Pathfinder/Flip Mats") and re.search(r"starfinder", canal, re.I):
-                return PAIZO + "/Starfinder/Flip-Mats"
+            if carpeta == FLIP_PF + "/Flip-Mats" and re.search(r"starfinder", canal, re.I):
+                return FLIP_SF
             return carpeta
     return None
 

@@ -293,17 +293,15 @@ def test_revision_por_grupos(entorno):
     assert (raiz / "RPG/Cosas raras/Cosa rara tres.pdf").is_file()
 
 
-def test_flip_mats_a_su_carpeta_de_assets():
-    from biblioteca_rpg import config, rutas
-    from biblioteca_rpg.entrada import PAIZO, destino_mapa
-    assert destino_mapa("Flip-Mat - City Gates .pdf") == PAIZO + "/Pathfinder/Flip Mats"
-    assert destino_mapa("Pathfinder_Flip_Map_Dungeon.pdf") == PAIZO + "/Pathfinder/Flip Mats"
-    assert destino_mapa("Flip Tiles - Forest Starter Set.pdf") == PAIZO + "/Pathfinder/Flip-Tiles"
-    assert destino_mapa("Starfinder Flip-Mat - Asteroid.pdf") == PAIZO + "/Starfinder/Flip-Mats"
-    assert destino_mapa("Flip-Mat - Basic Starfield.pdf", "Starfinder Society") == PAIZO + "/Starfinder/Flip-Mats"
+def test_flip_mats_van_con_su_juego():
+    from biblioteca_rpg.entrada import FLIP_PF, FLIP_SF, destino_mapa
+    assert destino_mapa("Flip-Mat - City Gates .pdf") == FLIP_PF + "/Flip-Mats"
+    assert destino_mapa("Pathfinder_Flip_Map_Dungeon.pdf") == FLIP_PF + "/Flip-Mats"
+    assert destino_mapa("Flip Tiles - Forest Starter Set.pdf") == FLIP_PF + "/Flip-Tiles"
+    assert destino_mapa("Starfinder Flip-Mat - Asteroid.pdf") == FLIP_SF
+    assert destino_mapa("Flip-Mat - Basic Starfield.pdf", "Starfinder Society") == FLIP_SF
     assert destino_mapa("Flipmatic Adventures.pdf") is None
-    assert config.en_areas(config.cargar().areas, PAIZO + "/Pathfinder/Flip Mats")
-    assert rutas.analizar(PAIZO + "/Pathfinder/Flip Mats/PZO30011 - Forest Path.pdf").categoria == "Mapas"
+    assert FLIP_PF == "RPG/Pathfinder/Any Edition/Game Aids" and FLIP_SF == "RPG/Starfinder/Game Aids/Flip-Mats"
 
 
 def test_packs_de_assets_sin_pdf(entorno):
