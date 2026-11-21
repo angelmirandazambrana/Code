@@ -11,6 +11,7 @@ services:
       - "${PUERTO:-8090}:8090"
     environment:
       BIBLIOTECA_RUTA_SMB: "${RUTA_SMB:-}"
+      CLASIFICADOR_AUTO: "${CLASIFICADOR_AUTO:-0.9}"   # solo para decirlo en la Entrada
       TZ: "${TZ:-Europe/Madrid}"
     volumes:
       - "${BIBLIOTECA_HOST}:/biblioteca:ro"   # la biblioteca, SOLO LECTURA

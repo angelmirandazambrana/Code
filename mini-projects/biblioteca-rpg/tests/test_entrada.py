@@ -150,7 +150,7 @@ def test_web_decidir_y_corregir(entorno):
 
 def test_novelas_de_warhammer_por_canal_o_nombre():
     from biblioteca_rpg.entrada import NOVELAS_40K, destino_novela
-    assert destino_novela("Mike Brooks - Dead Drop.epub", "Necromunda Vault") == NOVELAS_40K + "/Necromunda"
+    assert destino_novela("Mike Brooks - Dead Drop.epub", "Necromunda Vault") == "Wargames/Games Workshop/Necromunda/Any Edition/Fiction"
     assert destino_novela("Uprising.epub", "Codex Warhammer 40000") == NOVELAS_40K
     assert destino_novela("Horus Heresy 01 - Horus Rising.mobi", "") == NOVELAS_40K + "/Horus Heresy"
     assert destino_novela("Codex Orks.pdf", "Codex Warhammer 40000") is None

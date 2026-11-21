@@ -43,6 +43,8 @@ from .juegos_lotes import (
     verificar_nuevos,
 )
 from .llm import ESQUEMA_USO, gastado_este_mes, texto_inicio
+from .oleadas import CUALQUIERA
+from .reorganizar import POR_CLASIFICAR
 
 ESTADO = "lotes_entrada.json"
 POR_LOTE = 300            # más grandes, el contenedor (768 MB) se queda sin memoria
@@ -51,6 +53,12 @@ BUSQUEDAS_DIA = int(os.environ.get("ENTRADA_LOTES_BUSQUEDAS_DIA") or 20)
 HORA = int(os.environ.get("ENTRADA_LOTES_HORA") or 3)
 MIRAR_CADA = 900           # segundos entre miradas al estado de los lotes
 NOTA = "colocado por Haiku"
+EBOOKS = {".epub", ".mobi", ".azw", ".azw3"}
+NOVELAS_SUELTAS = "RPG/_Novelas"   # novelas que no son de ningún juego
+
+
+def es_ebook(nombre: str) -> bool:
+    return os.path.splitext(nombre or "")[1].lower() in EBOOKS
 
 SISTEMA = """Clasificas lo que llega a la carpeta de entrada de una biblioteca de juegos de rol y wargames
 (descargas de Telegram, compras de DriveThruRPG…): un PDF o una carpeta con los PDF de un producto.
@@ -84,7 +92,7 @@ def _estado(cfg) -> dict:
 
 
 def por_leer(con, cfg) -> list:
-    """Pendientes sin lectura de Claude, que no estén ya en un lote y que tengan algún PDF."""
+    """Pendientes sin lectura de Claude, que no estén ya en un lote y que tengan algún PDF (o sean un ebook)."""
     from .entrada import _pdfs
     ya = {i for lote in _estado(cfg)["lotes"] for i in lote["ids"]}
     res = []
@@ -93,7 +101,7 @@ def por_leer(con, cfg) -> list:
         if f["id"] in ya:
             continue
         ruta = cfg.raiz / f["ruta_actual"]
-        if ruta.exists() and _pdfs(ruta):
+        if ruta.exists() and (_pdfs(ruta) or (ruta.is_file() and es_ebook(ruta.name))):
             res.append(f)
     return res
 
@@ -101,7 +109,7 @@ def por_leer(con, cfg) -> list:
 def _peticion(con, cfg, f, lista: str) -> dict:
     from .entrada import _pdfs, canal_telegram, ruta_portada_entrada
     ruta = cfg.raiz / f["ruta_actual"]
-    pdfs = _pdfs(ruta)
+    pdfs = _pdfs(ruta) or [ruta]  # un ebook suelto: pymupdf también lo lee
     principal = max(pdfs, key=lambda p: p.stat().st_size)
     contenido: list = []
     portada = ruta_portada_entrada(cfg, f["id"])
@@ -109,6 +117,8 @@ def _peticion(con, cfg, f, lista: str) -> dict:
         contenido.append({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
                                                        "data": base64.standard_b64encode(portada.read_bytes()).decode()}})
     lineas = [f"{'Carpeta' if f['es_carpeta'] else 'Fichero'}: {f['nombre']}"]
+    if not f["es_carpeta"] and es_ebook(f["nombre"]):
+        lineas.append("Es un ebook: una novela. Di de qué juego es su mundo (tipo Fiction), o ninguno.")
     if f["es_carpeta"]:
         lineas.append("PDF de dentro: " + " | ".join(p.name for p in pdfs[:15]))
     if f["pdf_titulo"]:
@@ -248,6 +258,20 @@ def decidir(r: dict, alternativas: list, juegos: dict, verificados: dict) -> tup
     return carpeta, False, f"{motivo} (seguridad {seguridad})"
 
 
+def como_novela(r: dict, alternativas: list, juegos: dict, verificados: dict) -> tuple[str | None, bool, str]:
+    """Un ebook es siempre una novela: a la Fiction de su juego (sin edición si no la sabe), o a
+    NOVELAS_SUELTAS si no es de ningún juego."""
+    if r.get("tipo_juego") == NINGUNO:
+        return NOVELAS_SUELTAS, True, "novela que no es de ningún juego"
+    carpeta, sola, motivo = decidir({**r, "tipo": "Fiction"}, alternativas, juegos, verificados)
+    if not carpeta:
+        return NOVELAS_SUELTAS, False, f"novela; {motivo}"
+    base, ultimo = carpeta.rsplit("/", 1)
+    if ultimo == POR_CLASIFICAR:
+        base = f"{base}/{CUALQUIERA}"
+    return f"{base}/Fiction", sola, f"novela; {motivo}"
+
+
 def _nuevos_de(filas, juegos: dict) -> dict[str, dict]:
     """Juegos que no tenemos y que Haiku ve claros: a comprobar en la web."""
     nuevos: dict[str, dict] = {}
@@ -293,7 +317,8 @@ def colocar(con, cfg, ensayo: bool = False) -> Counter:
         llm = json.loads(f["llm"])
         alternativas = json.loads(f["alternativas"] or "[]")
         sin_claude = [a for a in alternativas if a[1] is not None]
-        carpeta, sola, motivo = decidir(llm["respuesta"], sin_claude, juegos, verificados)
+        decide = como_novela if not f["es_carpeta"] and es_ebook(f["nombre"]) else decidir
+        carpeta, sola, motivo = decide(llm["respuesta"], sin_claude, juegos, verificados)
         cuenta["se coloca" if sola and cfg.auto else motivo.split(" (")[0].split(";")[0]] += 1
         if ensayo:
             if sola:

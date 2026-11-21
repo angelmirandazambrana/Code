@@ -227,8 +227,36 @@ def pasada_geek(con, limite: int | None = None, minutos: float | None = None, mu
 
 # --- Valores efectivos ----------------------------------------------------------
 
-def _efectivos(extras: dict) -> dict:
-    """extras: {fuente: datos} ya aceptados -> columnas del catálogo."""
+# Año en el nombre del fichero: entre corchetes o paréntesis ("[2013]", "(MACE 2013)"), junto a un mes
+# ("April 1983", "2019-12") o, fuera de los wargames, suelto ("Gongfarmer's Almanac 2019"). Desde 1960:
+# antes suelen ser batallas ("Peleliu 1944"); y fuera los años que son parte del título.
+_ANIO = r"(19[6-9]\d|20[0-9]\d)"
+_MES = (r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|ene|abr|ago|dic)[a-z]*\.?|spring|summer|autumn|fall|"
+        r"winter|primavera|verano|oto[ñn]o|invierno")
+# Sin letras pegadas: "GDW2017" es un código y "Fox2000" un usuario.
+RE_ANIO_CAJA = re.compile(r"[\[(][^\])]*?(?<![A-Za-z\d])" + _ANIO + r"(?![A-Za-z\d])[^\])]*[\])]")
+RE_ANIO_FECHA = re.compile(rf"(?<![a-z])({_MES})[\s_-]*{_ANIO}(?!\d)|(?<![\d.]){_ANIO}[\s_-]+(0[1-9]|1[0-2])(?!\d)|"
+                           rf"(?<![\d.])(0?[1-9]|1[0-2])[-/]{_ANIO}(?!\d)", re.I)
+RE_ANIO_SUELTO = re.compile(r"(?<![A-Za-z\d.,])" + _ANIO + r"(?![A-Za-z\d.,]|'s\b)")  # no "1990's"
+RE_TITULO_CON_ANIO = re.compile(r"cyberpunk[\s_-]*20[0-9]{2}|twilight[\s_:-]*20[0-9]{2}|2300[\s_]*ad|"
+                                r"space[\s_-]*1889|\b1984\b|year[\s_-]*20[0-9]{2}|datafortress[\s_-]*2020|"
+                                r"pacesetter[\s_-]*\d{4}", re.I)
+
+
+def anio_del_nombre(nombre: str, ruta: str = "", anio_max: int | None = None) -> int | None:
+    anio_max = anio_max or time.localtime().tm_year
+    s = RE_TITULO_CON_ANIO.sub(" ", re.sub(r"\.[a-z0-9]{2,4}$", "", nombre or "", flags=re.I))
+    patrones = [RE_ANIO_CAJA, RE_ANIO_FECHA] + ([] if (ruta or "").startswith("Wargames/") else [RE_ANIO_SUELTO])
+    for patron in patrones:
+        for m in patron.finditer(s):
+            anio = int(next(g for g in m.groups() if g and len(g) == 4 and g.isdigit()))
+            if anio <= anio_max:
+                return anio
+    return None
+
+
+def _efectivos(extras: dict, nombre: str = "", ruta: str = "") -> dict:
+    """extras: {fuente: datos} ya aceptados -> columnas del catálogo (el nombre, para el año si falta)."""
     pdf = extras.get("pdf") or {}
     g = (extras.get("geek") or {}).get("elegido") or {}
     v: dict = {"publicado": None, "ext_editorial": None, "autores": None, "isbn": None,
@@ -238,6 +266,8 @@ def _efectivos(extras: dict) -> dict:
         v["publicado"], origen["publicado"] = g["anio"], "geek"
     elif pdf.get("publicado"):
         v["publicado"], origen["publicado"] = pdf["publicado"], "pdf"
+    elif anio_del_nombre(nombre, ruta):
+        v["publicado"], origen["publicado"] = anio_del_nombre(nombre, ruta), "nombre"
     if g.get("editoriales"):
         v["ext_editorial"], origen["editorial"] = g["editoriales"][0], "geek"
     elif pdf.get("editorial"):
@@ -273,7 +303,9 @@ def aplicar(con, ids: list[int] | None = None) -> int:
         por_doc.setdefault(f[0], {})[f[1]] = json.loads(f[2])
     if ids is None:
         actuales_sql = "SELECT id, " + ", ".join(COLS) + " FROM docs WHERE origen IS NOT NULL OR isbn IS NOT NULL"
-        candidatos = {r[0] for r in con.execute(actuales_sql)} | set(por_doc)
+        candidatos = {r[0] for r in con.execute(actuales_sql)} | set(por_doc) | {
+            r[0] for r in con.execute("SELECT id, nombre, ruta FROM docs WHERE publicado IS NULL")
+            if anio_del_nombre(r[1], r[2])}
     else:
         candidatos = set(ids)
     cambios = []
@@ -281,10 +313,10 @@ def aplicar(con, ids: list[int] | None = None) -> int:
     lista = list(candidatos)
     for i in range(0, len(lista), 500):
         trozo = lista[i:i + 500]
-        filas = con.execute(f"SELECT id, {', '.join(COLS)} FROM docs WHERE id IN ({','.join('?' * len(trozo))})",
-                            trozo)
+        filas = con.execute(f"SELECT id, nombre, ruta, {', '.join(COLS)} FROM docs "
+                            f"WHERE id IN ({','.join('?' * len(trozo))})", trozo)
         for f in filas:
-            nuevo = _efectivos(por_doc.get(f[0], {}))
+            nuevo = _efectivos(por_doc.get(f[0], {}), f["nombre"], f["ruta"])
             if any(nuevo[c] != f[c] for c in COLS):
                 cambios.append([*(nuevo[c] for c in COLS), ahora, f[0]])
     if cambios:

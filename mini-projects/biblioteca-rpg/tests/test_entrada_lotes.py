@@ -102,3 +102,24 @@ def test_no_se_mete_solo_dentro_de_otro_producto(tmp_path, monkeypatch):
     assert producto_ajeno(con, "RPG/The One Ring/Core Rules/TOR_Starter_Set/Maps")
     assert not producto_ajeno(con, "RPG/The One Ring/Core Rules")
     assert not producto_ajeno(con, "RPG/The One Ring/Core Rules/TOR_Starter_Set 2")
+
+
+def test_los_ebooks_son_novelas():
+    from biblioteca_rpg.entrada import destino_novela
+    from biblioteca_rpg.entrada_lotes import NOVELAS_SUELTAS, como_novela
+    assert destino_novela("Gaunt's Ghosts - First and Only.epub", "Warhammer 40k libros") == \
+        "Wargames/Games Workshop/Warhammer 40K/Any Edition/Fiction"
+    assert destino_novela("R.A. Salvatore - Drizzt 01.mobi", "") == "RPG/D&D/Any Edition/Fiction"
+    assert destino_novela("Drizzt.pdf", "") is None
+    assert como_novela(r(tipo="Adventures"), [], JUEGOS, {})[:2] == ("RPG/Cairn/Fiction", True)
+    # Edición no clara: una novela no la necesita.
+    assert como_novela(r(juego="Shadowrun"), [], JUEGOS, {})[:2] == ("RPG/Shadowrun/Any Edition/Fiction", True)
+    assert como_novela(r(tipo_juego="ninguno"), [], JUEGOS, {})[:2] == (NOVELAS_SUELTAS, True)
+    assert como_novela(r(juego="Raro", en_lista=False), [], JUEGOS, {})[:2] == (NOVELAS_SUELTAS, False)
+
+
+def test_el_canal_de_dnd_no_hace_dnd_cualquier_novela():
+    from biblioteca_rpg.entrada import destino_novela
+    assert destino_novela("MtG Tarkir Dragonstorm.epub", "D&D Book Share") is None
+    assert destino_novela("FR-Shadowbane 02-Shadowbane (Retail).epub", "D&D Book Share") == \
+        "RPG/D&D/Any Edition/Fiction"

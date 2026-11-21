@@ -37,6 +37,7 @@ from .clasificador import (
 )
 from .db import conectar
 from .enriquecer import pasada_pdf
+from .entrada_lotes import EBOOKS, NOVELAS_SUELTAS, es_ebook
 from .indexador import _procesar_pdf, en_paralelo, generar_portadas, sincronizar
 
 COMPRIMIDOS = {".zip", ".rar", ".7z", ".cbz", ".cbr"}
@@ -47,12 +48,20 @@ ACTIVOS = ("nuevo", "pendiente", "aprobado", "error")
 
 # Novelas: el parecido de nombres no sirve ("Dead Drop" acaba en Drop Dead Studios), así que los
 # ebooks se colocan por el tema del canal de Telegram del que llegaron o por su propio nombre.
-EBOOKS = {".epub", ".mobi", ".azw", ".azw3"}
-NOVELAS_40K = "Wargames/Miniaturas/Games Workshop/Warhammer 40K/Black Library/Novels"
+# Todo ebook es una novela: si no lo dice el canal ni el nombre, Haiku dice de qué juego (a su Fiction)
+# o, si no es de ninguno, va a NOVELAS_SUELTAS.
+NOVELAS_40K = "Wargames/Games Workshop/Warhammer 40K/Any Edition/Fiction"
+# (patrón, carpeta, ¿vale también el canal?). Los canales de D&D («D&D Book Share») comparten
+# novelas de todo, así que para D&D solo cuenta el nombre.
 REGLAS_NOVELAS = [
-    (re.compile(r"necromunda", re.I), NOVELAS_40K + "/Necromunda"),
-    (re.compile(r"horus heresy", re.I), NOVELAS_40K + "/Horus Heresy"),
-    (re.compile(r"warhammer|40\.?000|\b40k\b|black library|space marine|necromunda", re.I), NOVELAS_40K),
+    (re.compile(r"necromunda", re.I), "Wargames/Games Workshop/Necromunda/Any Edition/Fiction", True),
+    (re.compile(r"horus heresy", re.I), NOVELAS_40K + "/Horus Heresy", True),
+    (re.compile(r"warhammer|40\.?000|\b40k\b|black library|space marine", re.I), NOVELAS_40K, True),
+    (re.compile(r"battle ?tech|mech ?warrior", re.I), "Wargames/Catalyst Game Labs/BattleTech/Fiction", True),
+    (re.compile(r"^FR[-_ ]|forgotten realms|drizzt|dragonlance|greyhawk|ravenloft|dark sun|athas|eberron|"
+                r"\bd ?& ?d\b|dungeons (&|and) dragons|salvatore|margaret weis|hickman|greenwood|elminster",
+                re.I), "RPG/D&D/Any Edition/Fiction", False),
+    (re.compile(r"everquest", re.I), "RPG/E/EverQuest/Fiction", False),
 ]
 
 
@@ -96,11 +105,11 @@ def canal_telegram(con, nombre: str) -> str:
 
 def destino_novela(nombre: str, canal: str) -> str | None:
     """Carpeta de novelas para un ebook, según el canal (primero) o el nombre; None si no es una."""
-    if Path(nombre).suffix.lower() not in EBOOKS:
+    if not es_ebook(nombre):
         return None
-    for texto in (canal, nombre):
-        for patron, carpeta in REGLAS_NOVELAS:
-            if texto and patron.search(texto):
+    for es_canal, texto in ((True, canal), (False, nombre)):
+        for patron, carpeta, por_canal in REGLAS_NOVELAS:
+            if texto and (por_canal or not es_canal) and patron.search(texto):
                 return carpeta
     return None
 
@@ -411,6 +420,9 @@ def proponer_entrada(con, cfg, bayes, f, pdfs: list, editorial, pdf_titulo, orig
     novela = destino_mapa(f["nombre"], canal) or (None if f["es_carpeta"] else destino_novela(f["nombre"], canal))
     if novela:
         p = {"propuesta": novela, "confianza": 1.0, "apoyos": VECINOS, "alternativas": [[novela, 100]]}
+    elif not f["es_carpeta"] and es_ebook(f["nombre"]):
+        # Novela de juego desconocido: el parecido de nombres no sirve; espera a Haiku (no se mueve sola).
+        p = {"propuesta": NOVELAS_SUELTAS, "confianza": 0.5, "apoyos": 0, "alternativas": [[NOVELAS_SUELTAS, 50]]}
     elif not pdfs and Path(f["nombre"]).suffix.lower() not in EBOOKS:
         # Sin PDF (pack de mapas, tokens, música…): se compara con las carpetas de assets,
         # usando también los nombres de lo que trae dentro.
@@ -479,6 +491,12 @@ def repasar_pendientes(con, cfg, log: "Registro | None" = None, forzar: bool = F
         p = proponer_entrada(con, cfg, bayes, f, _pdfs(ruta), f["editorial"], f["pdf_titulo"],
                              f["origen_texto"] or "", canal_telegram(con, f["nombre"]))
         if not p.get("propuesta"):
+            if f["propuesta"]:  # la que tenía ya no vale (p. ej. una carpeta de assets que se borró)
+                with con:
+                    con.execute("UPDATE entrada SET propuesta=NULL, confianza=0, apoyos=0, alternativas=? "
+                                "WHERE id=? AND estado='pendiente'",
+                                (json.dumps(con_claude([], f["llm"]), ensure_ascii=False), f["id"]))
+                cambiados += 1
             continue
         destino = p["propuesta"] if es_seguro(p, cfg.auto) else madre_segura(p, cfg.auto)
         if destino and producto_ajeno(con, destino):
