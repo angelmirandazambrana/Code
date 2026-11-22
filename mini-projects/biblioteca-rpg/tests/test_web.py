@@ -51,6 +51,13 @@ def test_subcarpetas(cliente):
     assert r["padre"] == "rpg/Nueva" and not r["existe_padre"] and r["carpetas"] == []
 
 
+def test_mover_sin_explicacion(cliente):
+    # Desde «Revisar con el PDF» sin pedir propuesta, explicacion_id llega vacío: no es un error de formulario.
+    r = cliente.post("/entrada/999", data={"accion": "mover", "destino": "RPG/X", "explicacion_id": "",
+                                           "volver": "/entrada/revisar"})
+    assert r.status_code == 404  # no existe esa entrada (antes: 422 por el campo vacío)
+
+
 def test_filtro_y_busqueda(cliente):
     r = cliente.get("/", params={"editorial": "FASA"})
     assert "SR3 Core" in r.text and "SR5 Core" not in r.text
@@ -141,3 +148,25 @@ def test_grupos_no_mezclan_lo_que_no_encaja():
     assert [x["carpeta"] for x in g] == [five, None]
     assert {x["id"] for x in g[0]["entradas"]} == {1, 2}
     assert g[1]["palabra"] == "battlerune" and {x["id"] for x in g[1]["entradas"]} == {3, 4, 5}
+
+
+def test_entrada_sin_pdf_enseña_el_contenido(cliente):
+    import os
+    from pathlib import Path
+
+    from biblioteca_rpg import config, db
+    raiz = Path(os.environ["BIBLIOTECA_RAIZ"])
+    carpeta = raiz / "_Inbox" / "Volo Arts"
+    carpeta.mkdir(parents=True)
+    (carpeta / "dragon.png").write_bytes(b"\x89PNG falso")
+    (carpeta / "leeme.txt").write_text("hola")
+    con = db.conectar(config.cargar().db)
+    with con:
+        con.execute("INSERT INTO entrada (id, nombre, ruta_actual, es_carpeta, estado) "
+                    "VALUES (77, 'Volo Arts', '_Inbox/Volo Arts', 1, 'pendiente')")
+    r = cliente.get("/entrada/77/pdf", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/entrada/77/contenido"
+    r = cliente.get("/entrada/77/contenido")
+    assert "2 ficheros, 1 imágenes" in r.text and "leeme.txt" in r.text
+    assert cliente.get("/entrada/77/fichero", params={"r": "dragon.png"}).content == b"\x89PNG falso"
+    assert cliente.get("/entrada/77/fichero", params={"r": "../../x"}).status_code == 404

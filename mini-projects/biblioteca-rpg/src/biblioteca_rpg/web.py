@@ -9,7 +9,7 @@ import sqlite3
 import time
 from pathlib import Path
 from typing import Annotated
-from urllib.parse import quote_plus, urlencode
+from urllib.parse import quote, quote_plus, urlencode
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -528,7 +528,7 @@ def api_explicar(entrada_id: int, texto: Annotated[str, Form()] = ""):
 @app.post("/entrada/{entrada_id}")
 def decidir_entrada(entrada_id: int, accion: str = Form(...), destino: str = Form(""),
                     destino_otra: str = Form(""), nombre: str = Form(""),
-                    explicacion_id: int | None = Form(None), volver: str = Form("")):
+                    explicacion_id: str = Form(""), volver: str = Form("")):
     """La web solo anota la decisión; el clasificador (el único que escribe en la biblioteca) la ejecuta."""
     con = _con()
     e = con.execute("SELECT estado FROM entrada WHERE id=?", (entrada_id,)).fetchone()
@@ -556,8 +556,8 @@ def decidir_entrada(entrada_id: int, accion: str = Form(...), destino: str = For
     with con:
         con.execute("UPDATE entrada SET estado=?, destino=?, nuevo_nombre=?, auto=?, decidido_en=?, nota=NULL "
                     "WHERE id=?", (*cambios, ahora, entrada_id))
-    if explicacion_id and accion == "mover":
-        explicar_mod.confirmar(con, explicacion_id, entrada_id, cambios[1])
+    if explicacion_id.strip().isdigit() and accion == "mover":  # vacío si no se pidió propuesta
+        explicar_mod.confirmar(con, int(explicacion_id), entrada_id, cambios[1])
     # Desde «Revisar con el PDF» se vuelve allí (al siguiente); solo rutas propias de la Entrada.
     destino_vuelta = volver if volver.startswith("/entrada") and "//" not in volver else "/entrada"
     return RedirectResponse(destino_vuelta, status_code=303)
@@ -571,8 +571,7 @@ def portada_entrada(entrada_id: int):
     return Response(PORTADA_VACIA, media_type="image/svg+xml", headers={"Cache-Control": "max-age=60"})
 
 
-@app.get("/entrada/{entrada_id}/pdf")
-def pdf_entrada(entrada_id: int):
+def _ruta_entrada(entrada_id: int):
     e = _con().execute("SELECT ruta_actual FROM entrada WHERE id=?", (entrada_id,)).fetchone()
     if not e:
         raise HTTPException(404, "No existe")
@@ -580,12 +579,61 @@ def pdf_entrada(entrada_id: int):
     ruta = (raiz / e["ruta_actual"]).resolve()
     if raiz not in ruta.parents or not ruta.exists():
         raise HTTPException(404, "Ya no está ahí")
+    return ruta
+
+
+@app.get("/entrada/{entrada_id}/pdf")
+def pdf_entrada(entrada_id: int):
+    ruta = _ruta_entrada(entrada_id)
     if ruta.is_dir():
         pdfs = [p for p in ruta.rglob("*") if p.is_file() and p.suffix.lower() == ".pdf"]
-        if not pdfs:
-            raise HTTPException(404, "No hay PDF dentro")
+        if not pdfs:  # papercraft, mapas, tokens…: se enseña lo que hay dentro
+            return RedirectResponse(f"/entrada/{entrada_id}/contenido", status_code=303)
         ruta = max(pdfs, key=lambda p: p.stat().st_size)
+    elif ruta.suffix.lower() != ".pdf":
+        return RedirectResponse(f"/entrada/{entrada_id}/contenido", status_code=303)
     return FileResponse(ruta, media_type="application/pdf", filename=ruta.name, content_disposition_type="inline")
+
+
+IMAGENES = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+
+
+@app.get("/entrada/{entrada_id}/contenido", response_class=HTMLResponse)
+def contenido_entrada(entrada_id: int):
+    """Lo que hay en una entrada sin PDF: los ficheros con su tamaño y las imágenes en miniatura."""
+    import html as html_mod
+    ruta = _ruta_entrada(entrada_id)
+    ficheros = sorted(p for p in ruta.rglob("*") if p.is_file()) if ruta.is_dir() else [ruta]
+    base = ruta if ruta.is_dir() else ruta.parent
+    imagenes = [p for p in ficheros if p.suffix.lower() in IMAGENES][:80]
+    filas = "".join(
+        f"<li>{html_mod.escape(str(p.relative_to(base)))} <span>{_tamano(p.stat().st_size)}</span></li>"
+        for p in ficheros[:500])
+    mas = f"<p>y {len(ficheros) - 500} ficheros más</p>" if len(ficheros) > 500 else ""
+    galeria = "".join(
+        f'<a href="/entrada/{entrada_id}/fichero?r={quote(str(p.relative_to(base)))}" target="_blank">'
+        f'<img loading="lazy" src="/entrada/{entrada_id}/fichero?r={quote(str(p.relative_to(base)))}" '
+        f'alt="{html_mod.escape(p.name)}"></a>' for p in imagenes)
+    return HTMLResponse(f"""<!doctype html><meta charset="utf-8"><title>Contenido</title>
+<style>body{{font:14px system-ui,sans-serif;margin:12px;color:#26231f;background:#faf8f4}}
+.g{{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-bottom:16px}}
+.g img{{width:100%;height:160px;object-fit:contain;background:#fff;border:1px solid #e2ddd3;border-radius:6px}}
+ul{{padding-left:18px;font-family:ui-monospace,Consolas,monospace;font-size:12px}} li span{{color:#6d675e}}
+@media (prefers-color-scheme:dark){{body{{background:#201e1b;color:#e9e4da}} .g img{{background:#2a2723;border-color:#34302a}}}}</style>
+<p><b>Sin PDF:</b> {len(ficheros)} ficheros{f", {len(imagenes)} imágenes" if imagenes else ""}.</p>
+<div class="g">{galeria}</div><ul>{filas}</ul>{mas}""")
+
+
+@app.get("/entrada/{entrada_id}/fichero")
+def fichero_entrada(entrada_id: int, r: str):
+    """Un fichero de dentro de una entrada (para las miniaturas del contenido)."""
+    base = _ruta_entrada(entrada_id)
+    if not base.is_dir():
+        base = base.parent
+    ruta = (base / r).resolve()
+    if base not in ruta.parents or not ruta.is_file():
+        raise HTTPException(404, "No está")
+    return FileResponse(ruta, content_disposition_type="inline")
 
 
 def _indice_carpetas(con) -> list[tuple[str, str, str, int]]:

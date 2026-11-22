@@ -173,7 +173,10 @@ def _contexto(con, cfg, e: dict, explicacion: str, cands: list[tuple[str, int]])
         lineas.append("El clasificador proponía: " + "; ".join(alts[:3]))
     try:
         ruta = cfg.raiz / e["ruta_actual"]
-        pdfs = _pdfs(ruta) if ruta.is_dir() else [ruta]
+        if ruta.is_dir():  # también sin PDF (papercraft, mapas, tokens): los nombres dicen mucho
+            nombres = sorted(str(p.relative_to(ruta)) for p in ruta.rglob("*") if p.is_file())
+            lineas.append(f"Ficheros dentro ({len(nombres)}): " + " | ".join(nombres[:25]))
+        pdfs = _pdfs(ruta) if ruta.is_dir() else ([ruta] if ruta.suffix.lower() == ".pdf" else [])
         if pdfs:
             texto = texto_inicio(max(pdfs, key=lambda p: p.stat().st_size))[:1500]
             if texto:
