@@ -136,6 +136,31 @@ def leer_ficha(it, tipo: str) -> dict:
 
 # --- Emparejado ---------------------------------------------------------------
 
+# Carpetas que solo agrupan juegos (no son un juego) en Juegos de mesa y Wargames.
+AGRUPAN_JUEGOS = {"Card games", "Board games", "_Sueltos", "Days of Wonder", "Milton Bradley", "Other Publishers"}
+
+
+def _nombre_de_juego(texto: str) -> str:
+    """'Blue Moon City - Cards' -> 'Blue Moon City'; 'Photosynthesis PnP' -> 'Photosynthesis'."""
+    t = re.sub(r"\s*[\(\[][^)\]]*[\)\]]", "", texto)            # (Z-Man), [multi], (166115394)
+    t = re.split(r"\s+-\s+|:\s", t)[0]                         # lo que va tras " - " es el producto
+    t = re.sub(r"\s*(&|and)\s+expansions?$|\s+pnp$|\s+print (and|&) play$", "", t, flags=re.I)
+    return t.strip() or texto
+
+
+def juego_para_bgg(carpeta: str, titulo: str) -> str:
+    """Nombre del juego para buscar en BoardGameGeek, sacado de la ruta o, si no, del título."""
+    p = carpeta.split("/")
+    if p[0] == "Juegos de mesa":
+        juego = next((s for s in p[1:] if s not in AGRUPAN_JUEGOS and not s.startswith("_")), None)
+    elif p[0] == "Wargames" and len(p) > 2 and not p[1].startswith("_"):
+        juego = p[2] if p[2] != "_Por clasificar" else None   # Wargames/<Editorial>/<Juego>/…
+    else:
+        juego = None
+    return _nombre_de_juego(juego or titulo)
+
+
+
 RE_RUIDO = re.compile(
     r"\[[^\]]*\]|\([^)]*\)|\{[^}]*\}|\b(?:v|ver|version)\s?\d+(?:\.\d+)*\b|\b\d+(?:st|nd|rd|th) print(?:ing)?\b|"
     r"\b(?:OEF|OCR|hq|hd|bookmarked|errata|final|web|print|ebook|pdf)\b",
@@ -148,6 +173,13 @@ def limpiar_titulo(titulo: str) -> str:
     t = RE_RUIDO.sub(" ", t)
     t = re.sub(r"\s+", " ", t).strip(" -–.,")
     return t
+
+
+# Partes del nombre que solas no dicen qué producto es ("TMB - Rulebook" -> no buscar "Rulebook").
+GENERICAS = {"rulebook", "rules", "rule book", "core rules", "core rulebook", "map", "maps", "cards", "counters",
+             "errata", "faq", "reference", "player aid", "player aids", "quick reference", "quickstart",
+             "character sheet", "character sheets", "scenario", "scenarios", "playbook", "rules reference",
+             "living rules", "tokens", "insert", "box", "cover", "manual", "booklet", "charts", "tables"}
 
 
 def variantes(titulo: str, sistema: str | None = None) -> list[str]:
@@ -165,13 +197,13 @@ def variantes(titulo: str, sistema: str | None = None) -> list[str]:
     vistos, res = set(), []
     for v in out:
         k = normalizar(v)
-        if len(k) >= 3 and k not in vistos:
+        if len(k) >= 3 and k not in vistos and k not in GENERICAS:
             vistos.add(k)
             res.append(v)
     return res[:3]
 
 
-def _parecido(a: str, b: str) -> float:
+def _parecido(a: str, b: str, parcial: bool = True) -> float:
     na, nb = normalizar(a), normalizar(b)
     if not na or not nb:
         return 0.0
@@ -182,7 +214,7 @@ def _parecido(a: str, b: str) -> float:
     ratio = difflib.SequenceMatcher(None, na, nb).ratio()
     ta, tb = set(na.split()), set(nb.split())
     # Uno contiene todas las palabras del otro ("Tomb of Horrors" ~ "S1 Tomb of Horrors").
-    if ta and tb and (ta <= tb or tb <= ta):
+    if parcial and ta and tb and (ta <= tb or tb <= ta):
         cubierto = min(len(ta), len(tb)) / max(len(ta), len(tb))
         ratio = max(ratio, 0.75 + 0.2 * cubierto)
     return ratio
@@ -190,7 +222,13 @@ def _parecido(a: str, b: str) -> float:
 
 def puntuar(doc: dict, ficha: dict, consultas: list[str]) -> float:
     nombres = [ficha["nombre"], *ficha.get("alternativos", [])]
-    p = max((_parecido(c, n) for c in consultas for n in nombres), default=0.0)
+    # Un juego de mesa tiene que llamarse igual: «Star Wars» no es «Clue: Star Wars».
+    parcial = ficha.get("tipo") != "boardgame"
+    p = max((_parecido(c, n, parcial) for c in consultas for n in nombres), default=0.0)
+    # Si solo cuadra una parte del título («… - The Invisible World»), hace falta que lo confirme
+    # la editorial o el sistema; si no, que lo mire una persona.
+    p_entero = max((_parecido(consultas[0], n, parcial) for n in nombres), default=0.0) if consultas else 0.0
+    confirmado = False
     anio_doc = doc.get("publicado") or None
     if anio_doc and ficha.get("anio"):
         dif = abs(anio_doc - ficha["anio"])
@@ -200,18 +238,28 @@ def puntuar(doc: dict, ficha: dict, consultas: list[str]) -> float:
         ne = normalizar(editorial)
         if any(ne in normalizar(e) or normalizar(e) in ne for e in ficha["editoriales"]):
             p += 0.06
+            confirmado = True
     sistema = doc.get("sistema")
     if sistema and ficha.get("sistema"):
         ns = normalizar(sistema)
         if any(ns in normalizar(s) for s in ficha["sistema"]):
             p += 0.04
+            confirmado = True
+    if p_entero < 0.9 and not confirmado and len(consultas) > 1:
+        p -= 0.1
     return round(min(p, 1.0), 3)
 
 
 def emparejar(cliente: Cliente, doc: dict) -> dict:
     """Busca el documento y devuelve {'estado', 'confianza', 'ref', 'datos'} para la tabla extra."""
     tipo = TIPO_POR_CATEGORIA.get(doc.get("categoria") or "", "rpgitem")
-    consultas = variantes(doc["titulo"], doc.get("sistema"))
+    if tipo == "boardgame":
+        # BGG tiene una ficha por juego, no por PDF: se busca el juego de la carpeta.
+        consultas = [juego_para_bgg(doc.get("carpeta") or "", doc.get("titulo") or "")]
+        if normalizar(consultas[0]) in GENERICAS:
+            consultas = []
+    else:
+        consultas = variantes(doc["titulo"], doc.get("sistema"))
     candidatos: dict[int, dict] = {}
     for q in consultas:
         for c in cliente.buscar(q, tipo)[:40]:
@@ -237,9 +285,9 @@ def emparejar(cliente: Cliente, doc: dict) -> dict:
     empate = len(puntuados) > 1 and puntuados[1]["puntos"] >= mejor["puntos"] - 0.02
     if mejor["puntos"] >= UMBRAL_AUTO and not empate:
         estado = "auto"
-    elif tipo == "boardgame" and mejor["puntos"] >= UMBRAL_REVISAR:
-        # Wargames y juegos de mesa: los datos de BGG se dan por buenos, sin revisión a mano.
-        estado = "auto"
+    elif tipo == "boardgame":
+        # Wargames y juegos de mesa: sin revisión a mano; o el juego coincide o no se apunta nada.
+        estado = "auto" if mejor["puntos"] >= UMBRAL_AUTO else "sin_resultado"
     elif mejor["puntos"] >= UMBRAL_REVISAR:
         estado = "pendiente"
     else:

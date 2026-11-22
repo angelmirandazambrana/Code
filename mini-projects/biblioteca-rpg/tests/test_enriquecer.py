@@ -74,8 +74,8 @@ def test_emparejar_auto_pendiente_y_nada():
     c2 = ClienteFalso({"Tomb Horrors Remix": [{"id": 1, "nombre": "Tomb of Horrors", "anio": 1978}]},
                       {1: _ficha(1, "Tomb of Horrors", 1978, "TSR")})
     assert geek.emparejar(c2, dudoso)["estado"] == "pendiente"
-    # Lo mismo en un wargame o juego de mesa: los datos de BGG se dan por buenos.
-    assert geek.emparejar(c2, {**dudoso, "categoria": "Wargames"})["estado"] == "auto"
+    # En un wargame o juego de mesa no hay revisión a mano: o coincide el juego o nada.
+    assert geek.emparejar(c2, {**dudoso, "categoria": "Wargames"})["estado"] == "sin_resultado"
 
     assert geek.emparejar(ClienteFalso({}, {}), doc)["estado"] == "sin_resultado"
 
@@ -144,3 +144,27 @@ def test_aplicar_y_revisar_en_la_web(catalogo):
     cli.post(f"/revisar/{tomb}", params={"accion": "rechazar"}, follow_redirects=False)
     assert "Publicado" not in cli.get(f"/libro/{tomb}").text
     assert cli.post(f"/revisar/{cosa}", params={"accion": "aceptar"}).status_code == 400
+
+
+def test_juego_de_mesa_se_busca_por_la_carpeta():
+    # «TMB - Rulebook» acababa en «DreadBall: Rulebook»: hay que buscar el juego, no «Rulebook».
+    bones = {"id": 5, "tipo": "boardgame", "nombre": "Too Many Bones", "alternativos": [], "anio": 2017,
+             "editoriales": ["Chip Theory Games"], "autores": [], "sistema": [], "url": "u/5"}
+    c = ClienteFalso({"Too Many Bones": [{"id": 5, "nombre": "Too Many Bones", "anio": 2017}],
+                      "Rulebook": [{"id": 9, "nombre": "DreadBall: Rulebook", "anio": 2012}]}, {5: bones})
+    doc = {"titulo": "TMB - Rulebook", "categoria": "Juegos de mesa", "carpeta": "Juegos de mesa/Too Many Bones"}
+    r = geek.emparejar(c, doc)
+    assert r["estado"] == "auto" and r["ref"] == "5"
+    assert "Rulebook" not in geek.variantes("TMB - Rulebook")
+
+
+def test_parte_del_titulo_sin_confirmar_no_es_automatico():
+    witch = {"id": 3, "tipo": "rpgitem", "nombre": "Witch Hunter: The Invisible World",
+             "alternativos": ["The Invisible World"], "anio": 2007, "editoriales": ["Alligator Alley"],
+             "autores": [], "sistema": [], "url": "u/3"}
+    c = ClienteFalso({"The Invisible World": [{"id": 3, "nombre": "Witch Hunter: The Invisible World"}]}, {3: witch})
+    doc = {"titulo": "Sky Realms of Jorune Isho - The Invisible World", "categoria": "Rol",
+           "sistema": "Skyrealms of Jorune"}
+    assert geek.emparejar(c, doc)["estado"] == "pendiente"
+    clue = {**witch, "tipo": "boardgame", "nombre": "Clue: Star Wars", "alternativos": []}
+    assert geek.puntuar({}, clue, ["Star Wars"]) < geek.UMBRAL_AUTO

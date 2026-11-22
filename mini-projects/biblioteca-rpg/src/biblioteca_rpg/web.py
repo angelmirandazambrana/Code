@@ -23,6 +23,7 @@ from .consultas import FACETAS, NO, ORDENES, SIN_VALOR, buscar, consulta_fts, fa
 from .db import conectar
 from .enriquecer import aplicar
 from .entrada import DUPLICADOS, destino_valido, ruta_portada_entrada
+from .geek import juego_para_bgg
 from .indexador import ruta_portada
 from .texto_pdf import normalizar
 
@@ -163,30 +164,6 @@ def inicio(request: Request, q: str = "", carpeta: str = "", orden: str = "", pa
         "migas": migas, "url": lambda **c: _url(base, **c),
         "total_catalogo": con.execute("SELECT COUNT(*) FROM docs").fetchone()[0],
     })
-
-
-# Carpetas que solo agrupan juegos (no son un juego) en Juegos de mesa y Wargames.
-AGRUPAN_JUEGOS = {"Card games", "Board games", "_Sueltos", "Days of Wonder", "Milton Bradley", "Other Publishers"}
-
-
-def _nombre_de_juego(texto: str) -> str:
-    """'Blue Moon City - Cards' -> 'Blue Moon City'; 'Photosynthesis PnP' -> 'Photosynthesis'."""
-    t = re.sub(r"\s*[\(\[][^)\]]*[\)\]]", "", texto)            # (Z-Man), [multi], (166115394)
-    t = re.split(r"\s+-\s+|:\s", t)[0]                         # lo que va tras " - " es el producto
-    t = re.sub(r"\s*(&|and)\s+expansions?$|\s+pnp$|\s+print (and|&) play$", "", t, flags=re.I)
-    return t.strip() or texto
-
-
-def juego_para_bgg(carpeta: str, titulo: str) -> str:
-    """Nombre del juego para buscar en BoardGameGeek, sacado de la ruta o, si no, del título."""
-    p = carpeta.split("/")
-    if p[0] == "Juegos de mesa":
-        juego = next((s for s in p[1:] if s not in AGRUPAN_JUEGOS and not s.startswith("_")), None)
-    elif p[0] == "Wargames" and len(p) > 2 and not p[1].startswith("_"):
-        juego = p[2] if p[2] != "_Por clasificar" else None   # Wargames/<Editorial>/<Juego>/…
-    else:
-        juego = None
-    return _nombre_de_juego(juego or titulo)
 
 
 @app.get("/libro/{doc_id}", response_class=HTMLResponse)
