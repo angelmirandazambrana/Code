@@ -70,12 +70,54 @@ document.querySelectorAll("[data-buscar-carpeta]").forEach((input) => {
     ops[activa].scrollIntoView({ block: "nearest" });
   };
   const elegir = (carpeta) => { input.value = carpeta; cerrar(); };
+  const aviso = (texto) => caja.append(Object.assign(document.createElement("span"), { className: "sin-resultados", textContent: texto }));
+  const boton = (carpeta, contenido, alElegir, clase) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.dataset.carpeta = carpeta;
+    if (clase) b.className = clase;
+    b.append(...contenido);
+    b.addEventListener("mousedown", (e) => { e.preventDefault(); alElegir(); });
+    caja.append(b);
+    return b;
+  };
 
-  input.addEventListener("input", () => {
-    const radio = input.closest(".opcion")?.querySelector("input[type=radio]");
-    if (radio) radio.checked = true;
+  // Escribiendo una ruta («RPG/Trav», «RPG/Traveller/»): las carpetas que cuelgan de ella.
+  // Elegir una con subcarpetas entra en ella; Tab completa con la marcada (o la primera).
+  const entrar = (carpeta, sub) => {
+    input.value = carpeta + (sub ? "/" : "");
+    if (sub) { input.focus(); buscar(); } else cerrar();
+  };
+  const navegar = async (q) => {
+    const yo = ++peticion;
+    let res;
+    try { res = await (await fetch("/api/subcarpetas?ruta=" + encodeURIComponent(q))).json(); } catch (_) { return; }
+    if (yo !== peticion) return;
+    caja.replaceChildren();
+    const parcial = q.replace(/\\/g, "/").split("/").pop().trim();
+    aviso(res.padre ? `Dentro de ${res.padre}${res.existe_padre ? "" : " (aún no existe: se creará)"}:` : "Carpetas principales:");
+    if (parcial && !res.exacta && res.padre) {
+      const nueva = res.padre + "/" + parcial;
+      boton(nueva, [Object.assign(document.createElement("span"), { textContent: "➕ Crear carpeta nueva: " + nueva })],
+            () => elegir(nueva), "crear");
+    }
+    const palabras = sinAcentos(parcial).split(/[^a-z0-9]+/).filter(Boolean);
+    res.carpetas.forEach(({ carpeta, n, sub }) => {
+      const nombre = Object.assign(document.createElement("span"), { className: "texto" });
+      nombre.append(resaltar(carpeta.split("/").pop(), palabras));
+      const extra = Object.assign(document.createElement("span"), { className: "n", textContent: n + (sub ? `  ·  ${sub} ▸` : "") });
+      boton(carpeta, [nombre, extra], () => entrar(carpeta, sub)).dataset.sub = sub;
+    });
+    if (!res.carpetas.length && !parcial) aviso("No tiene subcarpetas: puedes escribir el nombre de una nueva.");
+    if (res.mas) aviso(`y ${res.mas} más: sigue escribiendo para filtrar`);
+    caja.hidden = false;
+    activa = -1;
+  };
+
+  const buscar = () => {
     clearTimeout(temporizador);
     temporizador = setTimeout(async () => {
+      if (input.value.includes("/") || input.value.includes("\\") || !input.value.trim()) return navegar(input.value);
       const q = input.value.trim();
       if (q.length < 2) return cerrar();
       const yo = ++peticion;
@@ -118,12 +160,28 @@ document.querySelectorAll("[data-buscar-carpeta]").forEach((input) => {
       caja.hidden = false;
       activa = -1;
     }, 150);
+  };
+
+  input.addEventListener("input", () => {
+    const radio = input.closest(".opcion")?.querySelector("input[type=radio]");
+    if (radio) radio.checked = true;
+    buscar();
   });
+  input.addEventListener("focus", () => { if (!input.value.trim()) buscar(); });
+  const usar = (b) => {
+    if (b.dataset.sub !== undefined) entrar(b.dataset.carpeta, Number(b.dataset.sub));
+    else elegir(b.dataset.carpeta);
+  };
   input.addEventListener("keydown", (e) => {
     if (caja.hidden) return;
     if (e.key === "ArrowDown") { e.preventDefault(); marcar(activa + 1); }
     else if (e.key === "ArrowUp") { e.preventDefault(); marcar(activa - 1); }
-    else if (e.key === "Enter" && activa >= 0) { e.preventDefault(); elegir(opciones()[activa].dataset.carpeta); }
+    else if (e.key === "Enter" && activa >= 0) { e.preventDefault(); usar(opciones()[activa]); }
+    else if (e.key === "Tab" && !e.shiftKey && (input.value.includes("/") || !input.value.trim())) {
+      const ops = opciones().filter((o) => !o.classList.contains("crear"));
+      const b = activa >= 0 ? opciones()[activa] : ops[0];
+      if (b && !b.classList.contains("crear")) { e.preventDefault(); usar(b); }
+    }
     else if (e.key === "Escape") cerrar();
   });
   input.addEventListener("blur", () => setTimeout(cerrar, 100));
@@ -245,3 +303,55 @@ document.querySelectorAll("[data-marcar-todos]").forEach((b) =>
       grupos.forEach((d) => { d.open = abrir; });
     }));
 })();
+
+// Entrada · Revisar con el PDF: el dueño explica qué es y Claude propone la carpeta exacta.
+document.querySelectorAll("[data-explicar]").forEach((form) => {
+  const vista = form.closest(".revisar-pdf");
+  const id = vista.dataset.entrada;
+  const area = form.querySelector("textarea");
+  const estado = form.querySelector("[data-estado]");
+  const decision = vista.querySelector("form.decision");
+  const destino = decision.querySelector("[name=destino_otra]");
+  const otra = decision.querySelector("input[type=radio][value=__otra]");
+  const caja = decision.querySelector("[data-propuesta]");
+  const boton = form.querySelector("button[type=submit]");
+  const mover = decision.querySelector("button[value=mover]");
+  const avisar = (texto, error) => { estado.hidden = false; estado.textContent = texto; estado.classList.toggle("aviso", !!error); };
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!area.value.trim()) return area.focus();
+    boton.disabled = true;
+    avisar("Pensando dónde va…");
+    let res;
+    try {
+      const datos = new FormData();
+      datos.append("texto", area.value);
+      res = await (await fetch(`/api/entrada/${id}/explicar`, { method: "POST", body: datos })).json();
+    } catch (_) {
+      res = { error: "No se pudo contactar con la web." };
+    }
+    boton.disabled = false;
+    if (res.error || !res.carpeta) return avisar(res.error || "No ha propuesto una carpeta válida: elígela abajo.", true);
+    estado.hidden = true;
+    destino.value = res.carpeta;
+    otra.checked = true;
+    decision.querySelector("[data-explicacion-id]").value = res.id;
+    caja.replaceChildren(
+      Object.assign(document.createElement("div"), { className: "ruta", textContent: res.carpeta }),
+      Object.assign(document.createElement("div"), {
+        textContent: (res.existe ? "" : "➕ Carpeta nueva: se creará al mover. ") + res.motivo,
+      }));
+    caja.hidden = false;
+    mover.focus();  // Intro: mover y pasar al siguiente
+  });
+  area.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); form.requestSubmit(); }
+  });
+  area.focus();
+  document.addEventListener("keydown", (e) => {
+    if (!e.altKey || e.ctrlKey) return;
+    const a = vista.querySelector(e.key === "ArrowLeft" ? "[data-anterior]" : e.key === "ArrowRight" ? "[data-siguiente]" : null);
+    if (a) { e.preventDefault(); location.href = a.href; }
+  });
+});

@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block titulo %}Revisar con el PDF · Entrada{% endblock %}
+{% block contenido %}
+<section class="revisar-pdf" data-entrada="{{ e.id }}">
+  <div class="visor">
+    <iframe src="/entrada/{{ e.id }}/pdf#view=FitH" title="{{ e.nombre }}"></iframe>
+  </div>
+  <aside class="panel">
+    <nav class="pasos">
+      <a href="/entrada">← Entrada</a>
+      <span class="tenue">{{ pos }} de {{ total }}</span>
+      <span class="flechas">
+        {% if anterior %}<a href="/entrada/revisar?id={{ anterior }}" data-anterior title="Anterior (Alt+←)">‹ Anterior</a>{% endif %}
+        {% if siguiente %}<a href="/entrada/revisar?id={{ siguiente }}" data-siguiente title="Siguiente (Alt+→)">Siguiente ›</a>{% endif %}
+      </span>
+    </nav>
+
+    <h1>{% if e.es_carpeta %}📁 {% endif %}{{ e.nombre }}</h1>
+    <dl class="datos">
+      {% set d = [e.tamano|tamano, (e.n_pdfs ~ ' PDF') if e.es_carpeta and e.n_pdfs else None, (e.paginas ~ ' pág.') if e.paginas else None]|select|join(' · ') %}
+      {% if d %}<dt>Fichero</dt><dd>{{ d }}</dd>{% endif %}
+      {% if e.pdf_titulo and e.pdf_titulo != e.nombre %}<dt>Título interno</dt><dd>{{ e.pdf_titulo }}</dd>{% endif %}
+      {% if e.editorial %}<dt>Editorial</dt><dd>{{ e.editorial }}</dd>{% endif %}
+      {% if e.publicado %}<dt>Año</dt><dd>{{ e.publicado }}</dd>{% endif %}
+      {% if canal %}<dt>Telegram</dt><dd>{{ canal }}</dd>{% endif %}
+      {% if e.llm %}<dt>Claude</dt><dd>{{ e.llm.juego }} · {{ e.llm.tipo }} <span class="tenue">({{ e.llm.seguridad }})</span>{% if e.llm.motivo %}<br><span class="tenue">{{ e.llm.motivo }}</span>{% endif %}</dd>{% endif %}
+    </dl>
+    {% if e.origen_texto %}<p class="mensaje-tg" title="Mensaje de Telegram">✈ {{ e.origen_texto|truncate(300) }}</p>{% endif %}
+    {% if e.duplicado_de %}<p class="aviso">⚠ Ya está en la biblioteca: <a href="/libro/{{ e.duplicado_de }}" target="_blank">ver el que tienes</a></p>{% endif %}
+    {% if e.estado == 'error' %}<p class="aviso">No se pudo procesar: {{ e.nota }}</p>{% endif %}
+
+    <form class="explicar" data-explicar>
+      <label for="explicacion">¿Qué es y dónde lo pondrías?</label>
+      <textarea id="explicacion" name="texto" rows="4" placeholder="Ficha de personaje fan-made de World of Darkness; a Vampire Classic, aunque es para un Fiend que no es canon…"
+                {% if not hay_claude %}disabled{% endif %}></textarea>
+      <div class="acciones">
+        <button class="boton principal" type="submit" {% if not hay_claude %}disabled{% endif %}>Proponer carpeta</button>
+        <span class="tenue">Ctrl+Intro · dicta con Windows+H</span>
+      </div>
+      {% if not hay_claude %}<p class="tenue">Sin clave de Anthropic en la web: elige la carpeta abajo.</p>{% endif %}
+      <p class="estado" data-estado hidden></p>
+    </form>
+
+    <form class="decision" method="post" action="/entrada/{{ e.id }}">
+      <input type="hidden" name="volver" value="/entrada/revisar{% if siguiente %}?id={{ siguiente }}{% endif %}">
+      <input type="hidden" name="explicacion_id" value="" data-explicacion-id>
+      <fieldset>
+        <legend>¿A qué carpeta?</legend>
+        <div class="propuesta" data-propuesta hidden></div>
+        {% for carpeta, pct in e.alternativas[:4] %}
+          <label class="opcion"><input type="radio" name="destino" value="{{ carpeta }}">
+            <span class="ruta">{{ carpeta }}</span> <span class="confianza">{% if pct is none %}Claude{% else %}{{ pct }}%{% endif %}</span></label>
+        {% endfor %}
+        <label class="opcion otra"><input type="radio" name="destino" value="__otra" checked>
+          <span class="buscador-carpeta">
+            <input type="text" name="destino_otra" placeholder="Carpeta: palabras (vampire classic) o ruta (RPG/…/)" data-buscar-carpeta autocomplete="off">
+            <span class="sugerencias" role="listbox" hidden></span>
+          </span>
+        </label>
+      </fieldset>
+      <label class="renombrar">Nombre al moverlo <input type="text" name="nombre" placeholder="{{ e.nombre }}"></label>
+      <div class="acciones">
+        <button class="boton principal" type="submit" name="accion" value="mover">Mover y siguiente</button>
+        <button class="boton" type="submit" name="accion" value="descartar" formnovalidate>Descartar</button>
+      </div>
+    </form>
+  </aside>
+</section>
+{% endblock %}

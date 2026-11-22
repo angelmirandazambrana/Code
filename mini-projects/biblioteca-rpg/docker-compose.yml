@@ -12,6 +12,9 @@ services:
     environment:
       BIBLIOTECA_RUTA_SMB: "${RUTA_SMB:-}"
       CLASIFICADOR_AUTO: "${CLASIFICADOR_AUTO:-0.9}"   # solo para decirlo en la Entrada
+      # «Revisar con el PDF»: Haiku propone la carpeta con lo que explica el dueño (sin clave, no se usa).
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      LLM_MAX_DOLARES_MES: "${LLM_MAX_DOLARES_MES:-10}"
       TZ: "${TZ:-Europe/Madrid}"
     volumes:
       - "${BIBLIOTECA_HOST}:/biblioteca:ro"   # la biblioteca, SOLO LECTURA

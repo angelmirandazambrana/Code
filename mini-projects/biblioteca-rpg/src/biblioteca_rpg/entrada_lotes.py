@@ -27,7 +27,7 @@ import time
 from collections import Counter
 
 from . import config as config_mod
-from . import novedades
+from . import explicar, novedades
 from .db import conectar
 from .juegos_lotes import (
     ALIAS_JUEGO,
@@ -161,6 +161,9 @@ def enviar(con, cfg, maximo: int | None = None) -> int:
         if not filas:
             return 0
     lista, juegos = catalogo_juegos(con)
+    ej = explicar.ejemplos(con)  # lo que el dueño explicó en «Revisar con el PDF»: así lo aprende
+    if ej:
+        lista += "\n\n" + ej
     cliente = anthropic.Anthropic()
     for i in range(0, len(filas), POR_LOTE):
         trozo = filas[i:i + POR_LOTE]

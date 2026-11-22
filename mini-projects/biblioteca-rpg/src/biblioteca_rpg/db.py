@@ -146,12 +146,32 @@ CREATE TABLE IF NOT EXISTS novedades (
     leido_en INTEGER
 );
 CREATE INDEX IF NOT EXISTS ix_novedades_fecha ON novedades(fecha);
+
+-- Listas de productos de wikis (Traveller Wiki, Wikipedia), para emparejar con los libros (referencias.py).
+CREATE TABLE IF NOT EXISTS referencias (
+    id INTEGER PRIMARY KEY,
+    fuente TEXT NOT NULL,       -- traveller | wikipedia
+    pagina TEXT NOT NULL,
+    carpetas TEXT NOT NULL,     -- JSON: prefijos de ruta donde buscar sus libros
+    titulo TEXT NOT NULL,
+    anio INTEGER,
+    mes INTEGER,
+    editorial TEXT,
+    codigo TEXT,                -- TSR9039, PZO1110…
+    modulo TEXT,                -- código de módulo (A1, B2…)
+    isbn TEXT,                  -- ISBN-13
+    autores TEXT,
+    seccion TEXT,
+    url TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_referencias_pagina ON referencias(pagina);
 """
 
 # Columnas añadidas después de la v1: se crean al conectar si faltan.
 # Son los valores "efectivos" que salen de la tabla extra (los de la ruta nunca se tocan).
 COLUMNAS_EXTRA = {
     "publicado": "INTEGER",      # año de publicación (el 'anio' de la ruta es el de la edición)
+    "publicado_mes": "INTEGER",  # mes, si la fuente del año lo sabe
     "ext_editorial": "TEXT",     # editorial cuando la ruta no la dice
     "autores": "TEXT",
     "isbn": "TEXT",

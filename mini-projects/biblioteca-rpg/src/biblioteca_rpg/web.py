@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from . import config as config_mod
+from . import explicar as explicar_mod
 from .clasificador import POR_CLASIFICAR
 from .consultas import FACETAS, NO, ORDENES, SIN_VALOR, buscar, consulta_fts, facetas, subcarpetas
 from .db import conectar
@@ -479,9 +480,55 @@ def decidir_lote(destino: Annotated[str, Form()], ids: Annotated[list[int] | Non
     return RedirectResponse(f"/entrada?vista={vista}", status_code=303)
 
 
+def _pendientes_ids(con) -> list[int]:
+    return [r[0] for r in con.execute(
+        "SELECT id FROM entrada WHERE estado IN ('pendiente', 'error') ORDER BY llegado_en, id")]
+
+
+def _entrada_dict(f) -> dict:
+    e = dict(f)
+    e["alternativas"] = json.loads(e["alternativas"] or "[]")
+    e["llm"] = json.loads(e["llm"]) if e.get("llm") else None
+    return e
+
+
+@app.get("/entrada/revisar", response_class=HTMLResponse)
+def revisar_entrada(request: Request, id: int | None = None):
+    """Uno a uno con el PDF delante: el dueño explica qué es y Haiku propone la carpeta exacta."""
+    con = _con()
+    ids = _pendientes_ids(con)
+    if not ids:
+        return RedirectResponse("/entrada", status_code=303)
+    if id not in ids:
+        # Si ya no está pendiente (acaba de moverse), el siguiente de la lista.
+        id = next((i for i in ids if id is not None and i > id), ids[0])
+    pos = ids.index(id)
+    e = _entrada_dict(con.execute("SELECT * FROM entrada WHERE id=?", (id,)).fetchone())
+    from .entrada import canal_telegram
+    return plantillas.TemplateResponse(request, "revisar_entrada.html", {
+        "e": e, "pos": pos + 1, "total": len(ids), "canal": canal_telegram(con, e["nombre"]),
+        "anterior": ids[pos - 1] if pos > 0 else None, "siguiente": ids[pos + 1] if pos + 1 < len(ids) else None,
+        "hay_claude": explicar_mod.activo(),
+    })
+
+
+@app.post("/api/entrada/{entrada_id}/explicar")
+def api_explicar(entrada_id: int, texto: Annotated[str, Form()] = ""):
+    con = _con()
+    f = con.execute("SELECT * FROM entrada WHERE id=?", (entrada_id,)).fetchone()
+    if not f:
+        raise HTTPException(404, "No existe")
+    carpetas = [(c, n) for c, _, _, n in _indice_carpetas(con)]
+    try:
+        return JSONResponse(explicar_mod.proponer(con, cfg, _entrada_dict(f), texto, carpetas))
+    except Exception as ex:  # la API caída o sin saldo no debe romper la página
+        return JSONResponse({"error": f"{type(ex).__name__}: {ex}"[:300]})
+
+
 @app.post("/entrada/{entrada_id}")
 def decidir_entrada(entrada_id: int, accion: str = Form(...), destino: str = Form(""),
-                    destino_otra: str = Form(""), nombre: str = Form("")):
+                    destino_otra: str = Form(""), nombre: str = Form(""),
+                    explicacion_id: int | None = Form(None), volver: str = Form("")):
     """La web solo anota la decisión; el clasificador (el único que escribe en la biblioteca) la ejecuta."""
     con = _con()
     e = con.execute("SELECT estado FROM entrada WHERE id=?", (entrada_id,)).fetchone()
@@ -509,7 +556,11 @@ def decidir_entrada(entrada_id: int, accion: str = Form(...), destino: str = For
     with con:
         con.execute("UPDATE entrada SET estado=?, destino=?, nuevo_nombre=?, auto=?, decidido_en=?, nota=NULL "
                     "WHERE id=?", (*cambios, ahora, entrada_id))
-    return RedirectResponse("/entrada", status_code=303)
+    if explicacion_id and accion == "mover":
+        explicar_mod.confirmar(con, explicacion_id, entrada_id, cambios[1])
+    # Desde «Revisar con el PDF» se vuelve allí (al siguiente); solo rutas propias de la Entrada.
+    destino_vuelta = volver if volver.startswith("/entrada") and "//" not in volver else "/entrada"
+    return RedirectResponse(destino_vuelta, status_code=303)
 
 
 @app.get("/entrada/{entrada_id}/portada.jpg")
@@ -584,6 +635,54 @@ def api_carpetas(q: str = ""):
         if f["carpeta"] not in vistas:
             salida.append(f)
     return JSONResponse(salida[:30])
+
+
+def _arbol_carpetas(con) -> dict[str, list[tuple[str, int, int]]]:
+    """{carpeta padre en minúsculas: [(carpeta hija, nº de documentos, nº de subcarpetas)]}."""
+    def calcular():
+        hijos: dict[str, list] = {}
+        for carpeta, _, _, n in _indice_carpetas(con):
+            padre = carpeta.rpartition("/")[0]
+            hijos.setdefault(padre.lower(), []).append([carpeta, n, 0])
+        for lista in hijos.values():
+            for h in lista:
+                h[2] = len(hijos.get(h[0].lower(), ()))
+            lista.sort(key=lambda h: normalizar(h[0].rsplit("/", 1)[-1]))
+        return {p: [tuple(h) for h in lista] for p, lista in hijos.items()}
+    return _cacheado(con, ("arbol",), calcular)
+
+
+def hijas_de_ruta(arbol: dict, ruta: str) -> dict:
+    """Lo que cuelga de lo escrito: «RPG/Trav» -> las de RPG que empiezan (o contienen) «trav».
+
+    «RPG/Traveller/» -> todas las de RPG/Traveller. Sin distinguir mayúsculas ni acentos; la ruta del
+    padre vuelve con las mayúsculas reales (para crear una carpeta nueva bien escrita).
+    """
+    ruta = (ruta or "").replace("\\", "/").lstrip("/")
+    padre, _, parcial = ruta.rpartition("/")
+    padre = padre.strip("/")
+    lista = arbol.get(padre.lower(), [])
+    encontrado = None
+    if padre:
+        abuelo = padre.rpartition("/")[0]
+        encontrado = next((c for c, _, _ in arbol.get(abuelo.lower(), []) if c.lower() == padre.lower()), None)
+    canonico = encontrado or padre
+    q = normalizar(parcial)
+    if q:
+        nombre = lambda c: normalizar(c.rsplit("/", 1)[-1])
+        empiezan = [h for h in lista if nombre(h[0]).startswith(q)]
+        contienen = [h for h in lista if h not in empiezan and all(p in nombre(h[0]) for p in q.split())]
+        lista = empiezan + contienen
+    exacta = next((c for c, _, _ in lista if c.lower() == ruta.strip("/").lower()), None)
+    return {"padre": canonico, "existe_padre": not padre or encontrado is not None,
+            "exacta": exacta, "carpetas": [{"carpeta": c, "n": n, "sub": s} for c, n, s in lista[:40]],
+            "mas": max(0, len(lista) - 40)}
+
+
+@app.get("/api/subcarpetas")
+def api_subcarpetas(ruta: str = ""):
+    """Para escribir una ruta: las carpetas que cuelgan de lo ya escrito."""
+    return JSONResponse(hijas_de_ruta(_arbol_carpetas(_con()), ruta))
 
 
 def _carpetas_por_ficheros(con, q: str, n: int = 12) -> list[dict]:

@@ -36,6 +36,21 @@ def test_portada_lista_y_facetas(cliente):
     assert "Shadowrun" in r.text
 
 
+def test_subcarpetas(cliente):
+    r = cliente.get("/api/subcarpetas", params={"ruta": ""}).json()
+    assert [c["carpeta"] for c in r["carpetas"]] == ["Magazines", "RPG"]
+    r = cliente.get("/api/subcarpetas", params={"ruta": "rpg/shadowrun/"}).json()
+    assert r["padre"] == "RPG/Shadowrun" and r["existe_padre"]
+    assert [(c["carpeta"], c["n"], c["sub"]) for c in r["carpetas"]] == [
+        ("RPG/Shadowrun/3e (FASA, 1998)", 1, 0), ("RPG/Shadowrun/5e (Catalyst, 2013)", 1, 0)]
+    r = cliente.get("/api/subcarpetas", params={"ruta": "RPG/sha"}).json()
+    assert [c["carpeta"] for c in r["carpetas"]] == ["RPG/Shadowrun"] and r["exacta"] is None
+    r = cliente.get("/api/subcarpetas", params={"ruta": "RPG/Shadowrun/catal"}).json()
+    assert [c["carpeta"] for c in r["carpetas"]] == ["RPG/Shadowrun/5e (Catalyst, 2013)"]  # también en medio
+    r = cliente.get("/api/subcarpetas", params={"ruta": "rpg/Nueva/Algo"}).json()
+    assert r["padre"] == "rpg/Nueva" and not r["existe_padre"] and r["carpetas"] == []
+
+
 def test_filtro_y_busqueda(cliente):
     r = cliente.get("/", params={"editorial": "FASA"})
     assert "SR3 Core" in r.text and "SR5 Core" not in r.text

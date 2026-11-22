@@ -59,6 +59,7 @@
     <nav class="vistas" aria-label="Cómo revisar">
       <a href="/entrada"{% if not vista %} aria-current="page"{% endif %}>Uno a uno</a>
       <a href="/entrada?vista=grupos"{% if por_grupos %} aria-current="page"{% endif %}>Por grupos</a>
+      {% if pendientes %}<a href="/entrada/revisar">Revisar con el PDF</a>{% endif %}
       {% if n_por_clasificar %}<a href="/entrada?vista=por_clasificar"{% if vista == 'por_clasificar' %} aria-current="page"{% endif %}>Por clasificar ({{ n_por_clasificar }})</a>{% endif %}
     </nav>
   {% endif %}

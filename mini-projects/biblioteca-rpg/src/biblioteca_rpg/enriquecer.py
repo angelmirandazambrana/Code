@@ -260,17 +260,24 @@ def _efectivos(extras: dict, nombre: str = "", ruta: str = "") -> dict:
     """extras: {fuente: datos} ya aceptados -> columnas del catálogo (el nombre, para el año si falta)."""
     pdf = extras.get("pdf") or {}
     g = (extras.get("geek") or {}).get("elegido") or {}
-    v: dict = {"publicado": None, "ext_editorial": None, "autores": None, "isbn": None,
+    ref = extras.get("ref") or {}  # listas de wikis (referencias.py)
+    v: dict = {"publicado": None, "publicado_mes": None, "ext_editorial": None, "autores": None, "isbn": None,
                "geek_id": None, "geek_tipo": None, "ext_codigo": None, "ext_codigo_orden": None}
     origen: dict = {}
     if g.get("anio"):
         v["publicado"], origen["publicado"] = g["anio"], "geek"
+        if ref.get("publicado") == g["anio"]:
+            v["publicado_mes"] = ref.get("mes")
+    elif ref.get("publicado"):
+        v["publicado"], v["publicado_mes"], origen["publicado"] = ref["publicado"], ref.get("mes"), "ref"
     elif pdf.get("publicado"):
         v["publicado"], origen["publicado"] = pdf["publicado"], "pdf"
     elif anio_del_nombre(nombre, ruta):
         v["publicado"], origen["publicado"] = anio_del_nombre(nombre, ruta), "nombre"
     if g.get("editoriales"):
         v["ext_editorial"], origen["editorial"] = g["editoriales"][0], "geek"
+    elif ref.get("editorial"):
+        v["ext_editorial"], origen["editorial"] = ref["editorial"], "ref"
     elif pdf.get("editorial") and (pdf["editorial"] != "Wizards of the Coast" or texto_pdf.es_de_wotc(ruta)):
         v["ext_editorial"], origen["editorial"] = pdf["editorial"], "pdf"
     if g.get("autores"):
@@ -286,7 +293,7 @@ def _efectivos(extras: dict, nombre: str = "", ruta: str = "") -> dict:
     return v
 
 
-COLS = ["publicado", "ext_editorial", "autores", "isbn", "geek_id", "geek_tipo", "ext_codigo", "ext_codigo_orden",
+COLS = ["publicado", "publicado_mes", "ext_editorial", "autores", "isbn", "geek_id", "geek_tipo", "ext_codigo", "ext_codigo_orden",
         "origen"]
 
 
