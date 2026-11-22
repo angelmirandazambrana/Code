@@ -135,6 +135,17 @@ CREATE TABLE IF NOT EXISTS geek_cache (
     respuesta TEXT NOT NULL,
     creado_en INTEGER
 );
+
+-- Noticias de webs de rol y wargames (sus RSS): pistas para Haiku sobre lo que llega a la Entrada.
+CREATE TABLE IF NOT EXISTS novedades (
+    url TEXT PRIMARY KEY,
+    fuente TEXT NOT NULL,
+    titulo TEXT NOT NULL,
+    resumen TEXT,
+    fecha TEXT,              -- AAAA-MM-DD
+    leido_en INTEGER
+);
+CREATE INDEX IF NOT EXISTS ix_novedades_fecha ON novedades(fecha);
 """
 
 # Columnas añadidas después de la v1: se crean al conectar si faltan.

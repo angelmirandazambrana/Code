@@ -27,6 +27,7 @@ import time
 from collections import Counter
 
 from . import config as config_mod
+from . import novedades
 from .db import conectar
 from .juegos_lotes import (
     ALIAS_JUEGO,
@@ -73,7 +74,8 @@ Para cada uno di DE QUÉ JUEGO es:
 - tipo_juego: "rol" para juegos de rol (también los de jugar en solitario), "wargame" para wargames,
   juegos de miniaturas o de tablero.
 - tipo: el tipo de libro, de los permitidos.
-El canal y el mensaje de Telegram, si los hay, suelen decir de qué juego es. Las carpetas que propone
+El canal y el mensaje de Telegram, si los hay, suelen decir de qué juego es. Si te paso noticias de webs
+de rol, úsalas solo si hablan claramente de este mismo producto. Las carpetas que propone
 el clasificador son solo pistas por parecido de nombre: pueden estar mal.
 Seguridad "alta" solo si lo tienes claro. Material de terceros para un juego (p. ej. una aventura de
 otra editorial para D&D 5e) es de ese juego: "D&D 3rd Party" si está en la lista."""
@@ -134,6 +136,7 @@ def _peticion(con, cfg, f, lista: str) -> dict:
     if alternativas:
         lineas.append("El clasificador propone (por parecido): " +
                       "; ".join(f"{c} ({pct}%)" for c, pct in alternativas[:3] if pct is not None))
+    lineas += novedades.como_pista(novedades.parecidas(con, f["nombre"], f["pdf_titulo"] or ""))
     texto = texto_inicio(principal)[:2500]
     lineas += ["", "Primeras páginas:", texto or "(sin texto)"]
     contenido.append({"type": "text", "text": "\n".join(lineas)})
@@ -347,6 +350,7 @@ def automatico(con, cfg) -> None:
     """Desde el bucle del clasificador: recoge lo que haya terminado y, a su hora, manda lo nuevo."""
     if not activo():
         return
+    novedades.automatico(con)
     ahora = time.time()
     if ahora - _MIRADO.get("cuando", 0) < MIRAR_CADA:
         return
