@@ -18,6 +18,7 @@ from fastapi.templating import Jinja2Templates
 
 from . import config as config_mod
 from . import explicar as explicar_mod
+from . import manual as manual_mod
 from .clasificador import POR_CLASIFICAR
 from .consultas import FACETAS, NO, ORDENES, SIN_VALOR, buscar, consulta_fts, facetas, subcarpetas
 from .db import conectar
@@ -71,7 +72,8 @@ plantillas.env.globals["pendientes_entrada"] = lambda: _con().execute(
     "SELECT COUNT(*) FROM entrada WHERE estado IN ('pendiente', 'error')").fetchone()[0]
 plantillas.env.globals["hay_telegram"] = lambda: _con().execute(
     "SELECT EXISTS (SELECT 1 FROM telegram_canales)").fetchone()[0]
-NOMBRE_FUENTE = {"pdf": "el PDF", "rpgitem": "RPGGeek", "boardgame": "BoardGameGeek"}
+NOMBRE_FUENTE = {"pdf": "el PDF", "rpgitem": "RPGGeek", "boardgame": "BoardGameGeek", "ref": "las wikis",
+                 "nombre": "el nombre del fichero", "mano": "ti (escrito a mano)"}
 
 
 _cache: dict = {}
@@ -210,7 +212,72 @@ def ficha(request: Request, doc_id: int):
         "enlace_geek": geek, "nombre_geek": "BoardGameGeek" if es_wargame else "RPGGeek",
         "filtro": lambda faceta, valor: _url({}, alternar=(faceta, str(valor))),
         "extras": extras, "origen": origen, "volver": f"/libro/{doc_id}",
+        "a_mano": manual_mod.valores(con, [doc_id]).get(doc_id, {}), "campos": manual_mod.CAMPOS,
+        "valor_de": lambda c: _valor_campo(d, c), "error": request.query_params.get("error", ""),
+        "guardado": request.query_params.get("guardado", ""),
+        "meses": MESES,
     })
+
+
+MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre",
+         "noviembre", "diciembre"]
+
+
+def _valor_campo(d, campo: str):
+    """Lo que se ve (y se edita) de un campo en la ficha."""
+    if campo == "editorial":
+        return d["editorial"] or d["ext_editorial"]
+    return d[campo]
+
+
+@app.post("/libro/{doc_id}/datos")
+async def guardar_datos(request: Request, doc_id: int):
+    """Datos corregidos o completados a mano en la ficha. Vaciar un campo devuelve el automático."""
+    con = _con()
+    d = con.execute("SELECT * FROM docs WHERE id=?", (doc_id,)).fetchone()
+    if not d:
+        raise HTTPException(404, "No existe")
+    form = await request.form()
+    a_mano = manual_mod.valores(con, [doc_id]).get(doc_id, {})
+    cambios = {}
+    try:
+        for campo in manual_mod.CAMPOS:
+            if campo not in form:
+                continue
+            nuevo = manual_mod.normalizar_valor(campo, form.get(campo))
+            antes = manual_mod.normalizar_valor(campo, form.get(f"antes_{campo}"))
+            if nuevo == antes:
+                continue
+            if nuevo is None and campo not in a_mano:
+                continue  # vaciar un dato automático: no hay nada a mano que quitar
+            cambios[campo] = nuevo
+    except ValueError as ex:
+        return RedirectResponse(f"/libro/{doc_id}?{urlencode({'error': str(ex)})}#datos", status_code=303)
+    if cambios:
+        manual_mod.guardar(con, doc_id, cambios)
+        _cache.clear()  # facetas y sugerencias con los valores nuevos
+    return RedirectResponse(f"/libro/{doc_id}?guardado={len(cambios)}#datos", status_code=303)
+
+
+@app.get("/api/valores")
+def api_valores(campo: str, q: str = ""):
+    """Valores que ya hay en el catálogo para un campo (para el desplegable de la ficha)."""
+    if campo not in manual_mod.DE_RUTA and campo != "autores":
+        return JSONResponse([])
+    con = _con()
+
+    def calcular():
+        expr = "COALESCE(editorial_unif, editorial, ext_editorial)" if campo == "editorial" else campo
+        return [(f[0], normalizar(f[0]), f[1]) for f in con.execute(
+            f"SELECT {expr} AS v, COUNT(*) FROM docs WHERE {expr} IS NOT NULL AND {expr} <> '' GROUP BY v")]
+    palabras = normalizar(q).split()
+    res = []
+    for valor, norm, n in _cacheado(con, ("valores_campo", campo), calcular):
+        if all(p in norm for p in palabras):
+            empieza = bool(palabras) and (norm.startswith(palabras[0]) or f" {palabras[0]}" in f" {norm}")
+            res.append((not empieza, -n, valor))
+    res.sort()
+    return JSONResponse([{"valor": v, "n": -n} for _, n, v in res[:25]])
 
 
 @app.post("/libro/{doc_id}/papelera")

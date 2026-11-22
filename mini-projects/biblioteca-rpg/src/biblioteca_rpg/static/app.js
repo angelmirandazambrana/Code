@@ -355,3 +355,26 @@ document.querySelectorAll("[data-explicar]").forEach((form) => {
     if (a) { e.preventDefault(); location.href = a.href; }
   });
 });
+
+// Ficha: al corregir un dato, desplegable con los valores que ya hay en la biblioteca para ese campo
+// ("dead" en Sistema -> Deadlands, Deadlands Reloaded…), con cuántos documentos tiene cada uno.
+document.querySelectorAll("[data-valores]").forEach((input) => {
+  const lista = document.getElementById(input.getAttribute("list"));
+  let temporizador, peticion = 0, ultima = null;
+  const pedir = () => {
+    const q = input.value.trim();
+    if (q === ultima) return;
+    ultima = q;
+    const yo = ++peticion;
+    fetch(`/api/valores?campo=${encodeURIComponent(input.dataset.valores)}&q=${encodeURIComponent(q)}`)
+      .then((r) => r.json())
+      .then((valores) => {
+        if (yo !== peticion) return;
+        lista.replaceChildren(...valores.map((v) => Object.assign(document.createElement("option"),
+          { value: v.valor, label: `${v.n.toLocaleString("es")} documentos` })));
+      })
+      .catch(() => {});
+  };
+  input.addEventListener("focus", pedir);
+  input.addEventListener("input", () => { clearTimeout(temporizador); temporizador = setTimeout(pedir, 150); });
+});

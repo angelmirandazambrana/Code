@@ -324,6 +324,13 @@ def _mover(cfg, con, clase: str, origen: str, destino: str) -> str:
     with con:
         if clase == "libro":
             datos = analizar(nuevo)
+            fila = con.execute("SELECT id FROM docs WHERE ruta=?", (origen,)).fetchone()
+            if fila:
+                from . import manual
+                a_mano = manual.valores(con, [fila[0]]).get(fila[0], {})
+                for campo, valor in a_mano.items():
+                    if campo in manual.DE_RUTA:
+                        setattr(datos, campo, valor)
             # La editorial que salía de una carpeta que ya no está (D&D 3rd Party/5e/Kobold Press)
             # se conserva: el catálogo la sigue teniendo aunque la ruta ya no la diga.
             asignar = ", ".join("editorial=COALESCE(?, editorial)" if c == "editorial" else f"{c}=?"

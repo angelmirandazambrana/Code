@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 
 from . import config as config_mod
+from . import manual
 from .db import CAMPOS_RUTA, conectar
 from .rutas import analizar
 
@@ -64,11 +65,14 @@ def sincronizar(con, cfg, carpetas: list[str]) -> dict:
     }
     vistos = set()
     nuevos, cambiados, iguales = [], [], []
+    a_mano = manual.valores(con)
     for rel, tam, mt in recorrer(cfg.raiz, carpetas):
         vistos.add(rel)
         datos = analizar(rel).dict()
-        fila = [datos[c] for c in CAMPOS_RUTA]
         previo = existentes.get(rel)
+        if previo and previo[0] in a_mano:
+            manual.sobre_ruta(datos, a_mano[previo[0]])
+        fila = [datos[c] for c in CAMPOS_RUTA]
         if previo is None:
             nuevos.append([rel, *fila, tam, mt, ahora, ahora])
         elif previo[1] != tam or previo[2] != mt:

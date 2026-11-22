@@ -371,3 +371,15 @@ form.en-linea { display: inline; margin: 0; }
   .revisar-pdf .visor { height: 70vh; }
 }
 .explicar [hidden] { display: none; }
+
+/* Ficha: datos vacíos, escritos a mano y formulario para corregirlos */
+.datos .vacio { color: var(--tenue); }
+.a-mano { margin-left: 6px; font-size: 12px; color: var(--acento); }
+.hecho { color: var(--tenue); }
+.editar-datos { margin: 1rem 0; }
+.editar-datos summary { cursor: pointer; color: var(--acento); }
+.editar-datos form { margin-top: .75rem; }
+.campos-editar { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: .6rem 1rem; margin: .5rem 0 1rem; }
+.campos-editar label { display: flex; flex-direction: column; gap: .25rem; font-size: 13px; color: var(--tenue); }
+.campos-editar input, .campos-editar select { font: inherit; font-size: 15px; padding: .4rem .5rem; color: inherit;
+  background: var(--superficie); border: 1px solid var(--borde); border-radius: 6px; }

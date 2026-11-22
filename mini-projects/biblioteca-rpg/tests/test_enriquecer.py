@@ -142,7 +142,7 @@ def test_aplicar_y_revisar_en_la_web(catalogo):
     ficha = cli.get(f"/libro/{tomb}").text
     assert "Tomb of Horrors (reprint)" in ficha and "confirmado a mano" in ficha and "2005" in ficha
     cli.post(f"/revisar/{tomb}", params={"accion": "rechazar"}, follow_redirects=False)
-    assert "Publicado" not in cli.get(f"/libro/{tomb}").text
+    assert "2005" not in cli.get(f"/libro/{tomb}").text  # el año de RPGGeek se va con el rechazo
     assert cli.post(f"/revisar/{cosa}", params={"accion": "aceptar"}).status_code == 400
 
 

@@ -21,6 +21,7 @@ import time
 from . import codigos as codigos_mod
 from . import config as config_mod
 from . import geek as geek_mod
+from . import manual as manual_mod
 from . import texto_pdf
 from .db import conectar
 from .indexador import en_paralelo
@@ -293,6 +294,20 @@ def _efectivos(extras: dict, nombre: str = "", ruta: str = "") -> dict:
     return v
 
 
+def _a_mano(v: dict, man: dict) -> None:
+    """Lo escrito a mano en la ficha manda (origen «mano»)."""
+    origen = json.loads(v["origen"]) if v["origen"] else {}
+    for campo in manual_mod.DE_EXTRA:
+        if campo in man:
+            v[campo] = man[campo]
+            origen[{"publicado_mes": "publicado"}.get(campo, campo)] = "mano"
+    if "publicado" in man and "publicado_mes" not in man and origen.get("publicado") == "mano":
+        v["publicado_mes"] = None  # el mes de otra fuente no vale para un año puesto a mano
+    if "editorial" in man:
+        origen["editorial"] = "mano"
+    v["origen"] = json.dumps(origen) if origen else None
+
+
 COLS = ["publicado", "publicado_mes", "ext_editorial", "autores", "isbn", "geek_id", "geek_tipo", "ext_codigo", "ext_codigo_orden",
         "origen"]
 
@@ -309,9 +324,10 @@ def aplicar(con, ids: list[int] | None = None) -> int:
     for f in con.execute(f"SELECT doc_id, fuente, datos FROM extra WHERE estado IN ('auto', 'aceptado'){filtro}",
                          params):
         por_doc.setdefault(f[0], {})[f[1]] = json.loads(f[2])
+    a_mano = manual_mod.valores(con, ids)
     if ids is None:
         actuales_sql = "SELECT id, " + ", ".join(COLS) + " FROM docs WHERE origen IS NOT NULL OR isbn IS NOT NULL"
-        candidatos = {r[0] for r in con.execute(actuales_sql)} | set(por_doc) | {
+        candidatos = {r[0] for r in con.execute(actuales_sql)} | set(por_doc) | set(a_mano) | {
             r[0] for r in con.execute("SELECT id, nombre, ruta FROM docs WHERE publicado IS NULL")
             if anio_del_nombre(r[1], r[2])}
     else:
@@ -325,6 +341,8 @@ def aplicar(con, ids: list[int] | None = None) -> int:
                             f"WHERE id IN ({','.join('?' * len(trozo))})", trozo)
         for f in filas:
             nuevo = _efectivos(por_doc.get(f[0], {}), f["nombre"], f["ruta"])
+            if f[0] in a_mano:
+                _a_mano(nuevo, a_mano[f[0]])
             if any(nuevo[c] != f[c] for c in COLS):
                 cambios.append([*(nuevo[c] for c in COLS), ahora, f[0]])
     if cambios:

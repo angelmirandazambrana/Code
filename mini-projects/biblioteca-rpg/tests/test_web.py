@@ -170,3 +170,38 @@ def test_entrada_sin_pdf_enseña_el_contenido(cliente):
     assert "2 ficheros, 1 imágenes" in r.text and "leeme.txt" in r.text
     assert cliente.get("/entrada/77/fichero", params={"r": "dragon.png"}).content == b"\x89PNG falso"
     assert cliente.get("/entrada/77/fichero", params={"r": "../../x"}).status_code == 404
+
+
+def test_datos_a_mano_mandan_y_se_conservan(cliente):
+    import os
+    import re
+    from pathlib import Path
+
+    from biblioteca_rpg import config, db, enriquecer, indexador
+    r = cliente.get("/", params={"q": "Dragon 100"})
+    doc_id = int(re.search(r'href="/libro/(\d+)"', r.text).group(1))
+    ficha = cliente.get(f"/libro/{doc_id}").text
+    assert "Sistema / línea" in ficha and "Corregir o completar datos" in ficha  # vacío, pero se ve y se edita
+
+    r = cliente.post(f"/libro/{doc_id}/datos", data={
+        "sistema": "Deadlands", "antes_sistema": "", "editorial": "Pinnacle", "antes_editorial": "",
+        "publicado": "1996", "antes_publicado": "", "publicado_mes": "4", "antes_publicado_mes": "",
+        "tipo": "", "antes_tipo": ""}, follow_redirects=False)
+    assert r.status_code == 303 and "guardado=4" in r.headers["location"]
+    ficha = cliente.get(f"/libro/{doc_id}").text
+    assert "Deadlands" in ficha and "abril de" in ficha and "escrito a mano" in ficha
+
+    # Ni el indexador ni el enriquecido lo pisan.
+    cfg = config.cargar()
+    con = db.conectar(cfg.db)
+    indexador.sincronizar(con, cfg, cfg.areas)
+    enriquecer.aplicar(con)
+    f = con.execute("SELECT sistema, editorial, publicado, publicado_mes, origen FROM docs WHERE id=?", (doc_id,)).fetchone()
+    assert tuple(f)[:4] == ("Deadlands", "Pinnacle", 1996, 4) and '"publicado": "mano"' in f["origen"]
+
+    # El desplegable ofrece lo que hay; vaciar el campo devuelve el dato automático.
+    assert cliente.get("/api/valores", params={"campo": "sistema", "q": "dead"}).json() == [{"valor": "Deadlands", "n": 1}]
+    cliente.post(f"/libro/{doc_id}/datos", data={"sistema": "", "antes_sistema": "Deadlands"})
+    assert con.execute("SELECT sistema FROM docs WHERE id=?", (doc_id,)).fetchone()[0] == "Dragon Magazine"
+    assert "número entre" in cliente.post(f"/libro/{doc_id}/datos", data={"publicado": "96", "antes_publicado": "1996"}).text
+    assert Path(os.environ["BIBLIOTECA_RAIZ"]).exists()

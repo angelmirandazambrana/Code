@@ -53,6 +53,14 @@ END;
 -- Datos que no salen de la ruta: del texto del PDF ('pdf') o de RPGGeek/BGG ('geek').
 -- estado: auto (aceptado por confianza), aceptado / rechazado (a mano), pendiente (revisar),
 --         sin_resultado (no se encontró nada).
+-- Datos escritos a mano en la ficha: mandan sobre los deducidos (ver manual.py).
+CREATE TABLE IF NOT EXISTS manual (
+    doc_id INTEGER NOT NULL REFERENCES docs(id) ON DELETE CASCADE,
+    campo TEXT NOT NULL,
+    valor TEXT NOT NULL,
+    creado_en INTEGER,
+    PRIMARY KEY (doc_id, campo)
+);
 CREATE TABLE IF NOT EXISTS extra (
     doc_id INTEGER NOT NULL REFERENCES docs(id) ON DELETE CASCADE,
     fuente TEXT NOT NULL,
