@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 
 from . import config as config_mod
-from . import entrada_lotes, llm, packs, texto_pdf
+from . import entrada_lotes, estadisticas, llm, packs, texto_pdf
 from .clasificador import (
     VECINOS,
     Bayes,
@@ -783,6 +783,7 @@ def main(argv=None) -> None:
     while True:
         try:
             pasada(con, cfg)
+            estadisticas.fotografiar(con)
         except Exception as ex:  # que un fallo raro no pare el servicio
             print(f"Error en la pasada: {type(ex).__name__}: {ex}", file=sys.stderr, flush=True)
         if args.una_vez:

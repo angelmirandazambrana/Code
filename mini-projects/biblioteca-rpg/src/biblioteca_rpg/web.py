@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from . import config as config_mod
+from . import estadisticas as est_mod
 from . import explicar as explicar_mod
 from . import manual as manual_mod
 from .clasificador import POR_CLASIFICAR
@@ -894,6 +895,37 @@ def novedades(request: Request, dias: int = 30):
                        (desde,)).fetchall()
     return plantillas.TemplateResponse(request, "novedades.html", {
         "grupos": grupos, "total": len(filas), "dias": dias, "auto": auto,
+    })
+
+
+def _dia(texto: str):
+    from datetime import date
+    try:
+        return date.fromisoformat(texto)
+    except ValueError:
+        return None
+
+
+@app.get("/estadisticas", response_class=HTMLResponse)
+def estadisticas(request: Request, desde: str = "", hasta: str = "", agrupar: str = "auto"):
+    from datetime import date, timedelta
+    con = _con()
+    est_mod.fotografiar(con)
+    hoy, primero = date.today(), est_mod.primer_dia(con)
+    d_hasta = min(_dia(hasta) or hoy, hoy)
+    d_desde = _dia(desde) or primero
+    d_desde = min(d_desde, d_hasta)
+    elegido = agrupar if agrupar in est_mod.AGRUPACIONES else "auto"
+    real = est_mod.agrupacion_auto(d_desde, d_hasta) if elegido == "auto" else elegido
+    datos = est_mod.serie(con, d_desde, d_hasta, real)
+    foto = con.execute("SELECT * FROM fotos ORDER BY dia DESC LIMIT 1").fetchone()
+    atajos = [("Últimos 7 días", hoy - timedelta(days=6)), ("Últimos 30 días", hoy - timedelta(days=29)),
+              ("Este año", date(hoy.year, 1, 1)), ("Desde el principio", primero)]
+    return plantillas.TemplateResponse(request, "estadisticas.html", {
+        "datos": datos, "foto": foto, "desde": d_desde.isoformat(), "hasta": d_hasta.isoformat(),
+        "hoy": hoy.isoformat(), "agrupar": elegido, "real": real, "agrupaciones": est_mod.AGRUPACIONES,
+        "atajos": [(t, d.isoformat()) for t, d in atajos], "primera_foto": con.execute(
+            "SELECT MIN(dia) FROM fotos").fetchone()[0],
     })
 
 

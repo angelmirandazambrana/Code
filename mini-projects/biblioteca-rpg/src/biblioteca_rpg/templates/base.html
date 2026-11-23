@@ -21,6 +21,7 @@
     {% set n_entrada = pendientes_entrada() %}
     <a href="/entrada">Entrada{% if n_entrada %} <span class="globo">{{ n_entrada }}</span>{% endif %}</a>
     <a href="/novedades">Novedades</a>
+    <a href="/estadisticas">Estadísticas</a>
     {% if hay_telegram() %}<a href="/telegram">Telegram</a>{% endif %}
     {% set n_revisar = pendientes_revisar() %}
     {% if n_revisar %}<a href="/revisar">Revisar <span class="globo">{{ n_revisar }}</span></a>{% endif %}

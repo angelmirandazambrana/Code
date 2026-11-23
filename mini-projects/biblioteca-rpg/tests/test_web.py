@@ -205,3 +205,10 @@ def test_datos_a_mano_mandan_y_se_conservan(cliente):
     assert con.execute("SELECT sistema FROM docs WHERE id=?", (doc_id,)).fetchone()[0] == "Dragon Magazine"
     assert "número entre" in cliente.post(f"/libro/{doc_id}/datos", data={"publicado": "96", "antes_publicado": "1996"}).text
     assert Path(os.environ["BIBLIOTECA_RAIZ"]).exists()
+
+
+def test_estadisticas(cliente):
+    r = cliente.get("/estadisticas")
+    assert r.status_code == 200 and "Clasificados" in r.text and "datos-est" in r.text
+    r = cliente.get("/estadisticas", params={"desde": "2020-01-01", "hasta": "nada", "agrupar": "anio"})
+    assert r.status_code == 200 and "Años" in r.text

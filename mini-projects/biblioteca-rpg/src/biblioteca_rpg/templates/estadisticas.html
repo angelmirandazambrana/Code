@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block titulo %}Estadísticas · Biblioteca{% endblock %}
+{% block contenido %}
+<section class="estadisticas">
+  <h1>Estadísticas</h1>
+
+  <form class="filtros-est" method="get" action="/estadisticas">
+    <div class="atajos">
+      {% for texto, d in atajos %}
+        <a href="/estadisticas?desde={{ d }}&hasta={{ hoy }}&agrupar={{ agrupar }}"
+           {% if d == desde and hasta == hoy %}class="activo" aria-current="true"{% endif %}>{{ texto }}</a>
+      {% endfor %}
+    </div>
+    <label>Desde <input type="date" name="desde" value="{{ desde }}" max="{{ hoy }}"></label>
+    <label>Hasta <input type="date" name="hasta" value="{{ hasta }}" max="{{ hoy }}"></label>
+    <label>Por
+      <select name="agrupar">
+        <option value="auto" {% if agrupar == 'auto' %}selected{% endif %}>Automático</option>
+        {% for k, t in agrupaciones.items() %}<option value="{{ k }}" {% if agrupar == k %}selected{% endif %}>{{ t }}</option>{% endfor %}
+      </select>
+    </label>
+    <button type="submit">Ver</button>
+  </form>
+
+  {% set t = datos.totales %}
+  <div class="cifras">
+    <div class="cifra"><span class="valor">{{ "{:,}".format(foto.docs).replace(",", ".") }}</span><span class="nombre">documentos en la biblioteca</span></div>
+    <div class="cifra"><span class="valor">{{ "{:,}".format(foto.por_clasificar).replace(",", ".") }}</span><span class="nombre">en carpetas «_Por clasificar»</span></div>
+    <div class="cifra"><span class="valor">{{ "{:,}".format(foto.entrada).replace(",", ".") }}</span><span class="nombre"><a href="/entrada">en la Entrada sin decidir</a></span></div>
+    <div class="cifra"><span class="valor">{{ "{:,}".format((t.solos or 0) + (t.a_mano or 0)).replace(",", ".") }}</span><span class="nombre">clasificados en estas fechas</span></div>
+  </div>
+
+  <p class="tenue">Cuentan los lotes de la Entrada: un fichero suelto o una carpeta entera es uno.
+    {{ datos.etiquetas|length }} {{ agrupaciones[real]|lower }}{% if agrupar == 'auto' %} (elegido según las fechas){% endif %}.</p>
+
+  <div class="graficos">
+    <figure class="grafico">
+      <figcaption><h2>Clasificados</h2><p class="tenue">Lo que ha salido de la Entrada: {{ t.solos }} solos, {{ t.a_mano }} por ti, {{ t.duplicados }} duplicados descartados.</p></figcaption>
+      <div class="lienzo" data-grafico="barras" data-series="solos,a_mano,duplicados"
+           data-nombres="Solos (automático)|Por ti|Duplicados descartados"></div>
+    </figure>
+    <figure class="grafico">
+      <figcaption><h2>Llegados a la Entrada</h2><p class="tenue">{{ t.llegados }} en estas fechas (Telegram y lo que dejas en _Inbox).</p></figcaption>
+      <div class="lienzo" data-grafico="barras" data-series="llegados" data-nombres="Llegados"></div>
+    </figure>
+    <figure class="grafico">
+      <figcaption><h2>Sin decidir en la Entrada</h2><p class="tenue">Al final de cada periodo.</p></figcaption>
+      <div class="lienzo" data-grafico="linea" data-series="en_entrada" data-nombres="Sin decidir"></div>
+    </figure>
+    <figure class="grafico">
+      <figcaption><h2>Por clasificar en la biblioteca</h2><p class="tenue">Documentos en carpetas «_Por clasificar».
+        {% if primera_foto %}Se apunta una vez al día desde el {{ primera_foto.split("-")|reverse|join("/") }}; antes no hay datos.{% endif %}</p></figcaption>
+      <div class="lienzo" data-grafico="linea" data-series="por_clasificar" data-nombres="Por clasificar"></div>
+    </figure>
+  </div>
+
+  <details class="tabla-est">
+    <summary>Ver como tabla</summary>
+    <div class="desplazable">
+    <table>
+      <thead><tr><th>Periodo</th><th>Llegados</th><th>Solos</th><th>Por ti</th><th>Duplicados</th><th>Sin decidir</th><th>Por clasificar</th><th>Biblioteca</th></tr></thead>
+      <tbody>
+        {% for i in range(datos.periodos|length)|reverse %}
+          <tr><td>{{ datos.etiquetas[i] }}</td><td>{{ datos.llegados[i] }}</td><td>{{ datos.solos[i] }}</td>
+            <td>{{ datos.a_mano[i] }}</td><td>{{ datos.duplicados[i] }}</td>
+            <td>{{ datos.en_entrada[i] if datos.en_entrada[i] is not none else '—' }}</td>
+            <td>{{ datos.por_clasificar[i] if datos.por_clasificar[i] is not none else '—' }}</td>
+            <td>{{ datos.docs[i] if datos.docs[i] is not none else '—' }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </details>
+</section>
+<script type="application/json" id="datos-est">{{ datos|tojson }}</script>
+<script src="/static/graficos.js?v={{ version }}" defer></script>
+{% endblock %}
