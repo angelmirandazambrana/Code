@@ -128,7 +128,7 @@ def test_busqueda_en_bgg_por_el_juego():
     assert j("Juegos de mesa/Card games/Photosynthesis PnP", "Photosynthesis - Rules") == "Photosynthesis"
     assert j("Juegos de mesa/Card games/Deadwood & Expansions", "Deadwood-Card-Backs") == "Deadwood"
     assert j("Juegos de mesa/Pandemic - Contagion (Z-Man)", "x") == "Pandemic"
-    assert j("Wargames/Avalon Hill/ASL/Rules", "ASL Rulebook 2nd ed") == "ASL"
+    assert j("Wargames/Avalon Hill/ASL/Rules", "ASL Rulebook 2nd ed") == "Advanced Squad Leader"
     assert j("Wargames/_Reference/Jane's", "Jane's Fighting Ships - 1990") == "Jane's Fighting Ships"
     assert j("Juegos de mesa/_Sueltos", "Catan - Rules") == "Catan"
 

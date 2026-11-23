@@ -257,6 +257,18 @@ def anio_del_nombre(nombre: str, ruta: str = "", anio_max: int | None = None) ->
     return None
 
 
+# En BoardGameGeek la ficha es la del juego: su año vale para el reglamento y los componentes,
+# no para un suplemento, una campaña o una revista de ese juego publicados años después.
+TIPOS_DEL_PROPIO_JUEGO = (None, "Reglas", "Ayudas de juego")
+
+
+def _anio_geek_vale(g: dict, ruta: str) -> bool:
+    if g.get("tipo") != "boardgame" or g.get("version_por"):
+        return True
+    from .rutas import analizar
+    return not ruta or analizar(ruta).tipo in TIPOS_DEL_PROPIO_JUEGO
+
+
 def _efectivos(extras: dict, nombre: str = "", ruta: str = "") -> dict:
     """extras: {fuente: datos} ya aceptados -> columnas del catálogo (el nombre, para el año si falta)."""
     pdf = extras.get("pdf") or {}
@@ -265,7 +277,7 @@ def _efectivos(extras: dict, nombre: str = "", ruta: str = "") -> dict:
     v: dict = {"publicado": None, "publicado_mes": None, "ext_editorial": None, "autores": None, "isbn": None,
                "geek_id": None, "geek_tipo": None, "ext_codigo": None, "ext_codigo_orden": None}
     origen: dict = {}
-    if g.get("anio"):
+    if g.get("anio") and _anio_geek_vale(g, ruta):
         v["publicado"], origen["publicado"] = g["anio"], "geek"
         if ref.get("publicado") == g["anio"]:
             v["publicado_mes"] = ref.get("mes")

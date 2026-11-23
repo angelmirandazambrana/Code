@@ -168,3 +168,58 @@ def test_parte_del_titulo_sin_confirmar_no_es_automatico():
     assert geek.emparejar(c, doc)["estado"] == "pendiente"
     clue = {**witch, "tipo": "boardgame", "nombre": "Clue: Star Wars", "alternativos": []}
     assert geek.puntuar({}, clue, ["Star Wars"]) < geek.UMBRAL_AUTO
+
+
+def test_variantes_con_lo_que_ya_sabemos():
+    v = geek.variantes
+    assert v("JG48 Wilderlands of High Fantasy", "Wilderlands", "JG48")[0] == "Wilderlands of High Fantasy"
+    assert "Red Crypt" in " | ".join(v("The Fantasy Trip SJG Red Crypt", "The Fantasy Trip"))
+    assert "Samaris" in v("Dark Dungeon Samaris", "Dark Dungeon")
+    assert v("Story Engine Corebook", "Story Engine") == ["Story Engine"]
+    assert v("the-good-the-bad-and-the-troll")[0] == "the good the bad and the troll"
+    assert "The Sting of the Spider" in v("Top Secret S.I. - TSR7636 - TSE2 The Sting of the Spider", None, "TSR7636")
+
+
+def test_juego_de_la_carpeta_en_wargames():
+    j = geek.juego_para_bgg
+    assert j("Wargames/Avalon Hill/ASL/Critical Hit/Scenarios & Campaigns", "x") == "Advanced Squad Leader"
+    assert j("Wargames/Games Workshop/Warhammer 40K/Any Edition/Supplements", "x") == "Warhammer 40,000"
+    assert j("Wargames/Avalon Hill/Panzer Leader & Panzer Blitz/Scenarios", "x") == "Panzer Leader"
+    assert j("Wargames/Other Publishers/Five/Five parsecs from home/3E", "x") == "Five parsecs from home"
+    assert j("Wargames/WRG/Scenarios & Campaigns", "De Bellis Antiquitatis") == "De Bellis Antiquitatis"
+    assert j("Wargames/Solo/games/Escape from Stalingrad Z", "Escape from Stalingrad Z") == "Escape from Stalingrad Z"
+    assert geek.no_es_juego("Wargames/_Reference/Military History/Osprey")
+
+
+def test_puntuar_con_isbn_codigo_y_sistema():
+    ficha = {"id": 1, "tipo": "rpgitem", "nombre": "Riverworld", "alternativos": [], "anio": 1989,
+             "editoriales": ["Steve Jackson Games"], "sistema": ["GURPS (3rd Edition)"], "serie": [],
+             "versiones": [{"anio": 1990, "isbn": ["1556341601"], "codigo": "6028", "paginas": 128, "editoriales": []}]}
+    base = geek.puntuar({"titulo": "x"}, ficha, ["Riverworld Book"])
+    assert geek.puntuar({"isbn": "9781556341601"}, ficha, ["Riverworld Book"]) > base  # ISBN-10 = ISBN-13
+    assert geek.version_que_coincide({"codigo": "SJG6028"}, ficha)[1] == "codigo"
+    assert geek.coincide_sistema("GURPS", ficha) and geek.coincide_sistema("Hero System", ficha) is False
+    assert geek.puntuar({"sistema": "Hero System"}, ficha, ["Riverworld Book"]) < base
+    # Wargame: el suplemento de 2010 de un juego de 1984 no resta; «Mordheim» = «Mordheim: City of the Damned».
+    bt = {"id": 2, "tipo": "boardgame", "nombre": "BattleTech", "alternativos": [], "anio": 1984, "editoriales": []}
+    assert geek.puntuar({"publicado": 2010}, bt, ["BattleTech"]) >= geek.UMBRAL_AUTO
+    mh = {**bt, "nombre": "Mordheim: City of the Damned"}
+    assert geek.puntuar({}, mh, ["Mordheim"]) >= geek.UMBRAL_AUTO
+
+
+def test_anio_de_bgg_solo_para_el_propio_juego():
+    from biblioteca_rpg.enriquecer import _efectivos
+    g = {"geek": {"elegido": {"id": 1, "tipo": "boardgame", "anio": 1983, "editoriales": ["Games Workshop"]}}}
+    supl = _efectivos(g, "Triumph and Treachery.pdf", "Wargames/Games Workshop/Warhammer Fantasy/Supplements/T.pdf")
+    assert supl["publicado"] is None and supl["geek_id"] == 1
+    reglas = _efectivos(g, "WFB.pdf", "Wargames/Games Workshop/Warhammer Fantasy/Rules/WFB.pdf")
+    assert reglas["publicado"] == 1983
+
+
+def test_no_se_confirma_con_sus_propios_datos():
+    tng = {"id": 4, "tipo": "rpgitem", "nombre": "Star Trek: TNG & DS9", "alternativos": [], "anio": 2018,
+           "editoriales": ["X"], "autores": [], "sistema": ["JumpChain!"], "serie": [], "versiones": [], "url": "u/4"}
+    c = ClienteFalso({"Star Trek DS9": [{"id": 4, "nombre": "Star Trek: TNG & DS9", "anio": 2018}]}, {4: tng})
+    doc = {"titulo": "Star Trek DS9 Corebook", "categoria": "Rol", "sistema": "Star Trek", "publicado": 2018,
+           "ext_editorial": "X", "origen": '{"publicado": "geek", "editorial": "geek"}'}
+    assert geek.emparejar(c, doc)["estado"] == "pendiente"
