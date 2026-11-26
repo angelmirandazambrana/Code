@@ -384,21 +384,7 @@ document.querySelectorAll("[data-valores]").forEach((input) => {
   const caja = document.querySelector("[data-teclas-bgg]");
   const siguiente = document.querySelector("[data-siguiente-bgg]");
   if (!caja && !siguiente) return;
-  // El salto a #bgg se hace antes de que carguen las portadas y queda descolocado: repetirlo al final.
-  // La página cambia de alto mientras carga: se recoloca durante 2 s, salvo que muevas tú la página.
-  if (location.hash === "#bgg") {
-    const destino = caja || siguiente;
-    let tocado = false;
-    const ir = () => { if (!tocado) destino.scrollIntoView({ block: "start" }); };
-    for (const ev of ["wheel", "touchstart", "keydown", "mousedown"]) {
-      window.addEventListener(ev, () => { tocado = true; }, { once: true, passive: true });
-    }
-    const vigia = new ResizeObserver(ir);
-    vigia.observe(document.body);
-    ir();
-    window.addEventListener("load", ir);
-    setTimeout(() => vigia.disconnect(), 2000);
-  }
+  // Al confirmar se abre el siguiente documento arriba del todo, para verlo entero.
   document.addEventListener("keydown", (ev) => {
     if (ev.ctrlKey || ev.metaKey || ev.altKey || ev.repeat) return;
     const t = ev.target;

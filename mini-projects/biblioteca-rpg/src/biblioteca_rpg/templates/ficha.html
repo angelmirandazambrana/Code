@@ -139,7 +139,7 @@
     {% endif %}
     {% if (g and g.estado == 'pendiente') or revisado %}
       {% if siguiente_revisar and siguiente_revisar != d.id %}
-        <p><a class="boton mini" href="/libro/{{ siguiente_revisar }}#bgg" data-siguiente-bgg>Siguiente por revisar →</a>
+        <p><a class="boton mini" href="/libro/{{ siguiente_revisar }}" data-siguiente-bgg>Siguiente por revisar →</a>
           <a class="tenue" href="/revisar">Ver la lista</a></p>
       {% elif not siguiente_revisar %}
         <p class="hecho">No queda nada por revisar con {{ nombre_geek }}. 🎉</p>

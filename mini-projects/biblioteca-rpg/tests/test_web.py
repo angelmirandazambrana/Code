@@ -228,14 +228,14 @@ def test_revisar_bgg_y_pasar_al_siguiente(cliente):
                         (doc_id, conf, json.dumps(cand)))
     con.close()
     r = cliente.get(f"/libro/{ids[0]}")
-    assert 'data-tecla="1"' in r.text and 'data-tecla="0"' in r.text and f'href="/libro/{ids[1]}#bgg"' in r.text
+    assert 'data-tecla="1"' in r.text and 'data-tecla="0"' in r.text and f'href="/libro/{ids[1]}"' in r.text
     r = cliente.post(f"/revisar/{ids[0]}?accion=aceptar&ref=5&volver=/revisar/siguiente?tras={ids[0]}",
                      follow_redirects=True)
-    assert f"/libro/{ids[1]}?revisado={ids[0]}#bgg" in str(r.url)
+    assert f"/libro/{ids[1]}?revisado={ids[0]}" in str(r.url)
     assert "Guardado" in r.text and "es SR3" in r.text
     r = cliente.post(f"/revisar/{ids[2]}?accion=rechazar&volver=/revisar/siguiente?tras={ids[2]}",
                      follow_redirects=True)
-    assert f"/libro/{ids[1]}?revisado={ids[2]}#bgg" in str(r.url)  # vuelve al principio
+    assert f"/libro/{ids[1]}?revisado={ids[2]}" in str(r.url)  # vuelve al principio
     assert "ninguno era" in r.text
     r = cliente.post(f"/revisar/{ids[1]}?accion=rechazar&volver=/revisar/siguiente?tras={ids[1]}",
                      follow_redirects=True)

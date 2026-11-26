@@ -256,7 +256,7 @@ def revisar_siguiente(tras: int | None = None):
     sig = _siguiente_revisar(_con(), tras)
     if sig is None:
         return RedirectResponse("/revisar", status_code=303)
-    return RedirectResponse(f"/libro/{sig}" + (f"?revisado={tras}" if tras else "") + "#bgg", status_code=303)
+    return RedirectResponse(f"/libro/{sig}" + (f"?revisado={tras}" if tras else ""), status_code=303)
 
 
 MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre",
