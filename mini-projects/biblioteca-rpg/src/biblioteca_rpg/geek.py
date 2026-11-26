@@ -23,6 +23,8 @@ CADUCIDAD_CACHE = 180 * 86400
 
 UMBRAL_AUTO = 0.92
 UMBRAL_REVISAR = 0.70
+# Si dos candidatos se llaman igual, el primero tiene que sacar esta ventaja para elegirlo solo.
+MARGEN_MISMO_NOMBRE = 0.055
 
 TIPO_POR_CATEGORIA = {"Rol": "rpgitem", "Wargames": "boardgame", "Juegos de mesa": "boardgame"}
 URL_FICHA = {"rpgitem": "https://rpggeek.com/rpgitem/{}", "boardgame": "https://boardgamegeek.com/boardgame/{}"}
@@ -244,9 +246,14 @@ def _sin_sistema(t: str, sistema: str | None) -> str | None:
     """«Dark Dungeon Samaris» con sistema «Dark Dungeon» -> «Samaris»."""
     if not sistema:
         return None
-    ns, palabras = normalizar(sistema).split(), t.split()
-    if ns and [normalizar(w) for w in palabras[:len(ns)]] == ns and len(palabras) > len(ns):
-        return " ".join(palabras[len(ns):]).strip(" -–:,")
+    ns, palabras = normalizar(sistema), t.split()
+    # Palabra a palabra, normalizando lo acumulado («D&D» es «d and d»: una palabra que son tres).
+    for i in range(1, len(palabras)):
+        hecho = normalizar(" ".join(palabras[:i]))
+        if hecho == ns:
+            return " ".join(palabras[i:]).strip(" -–:,") or None
+        if not ns.startswith(hecho):
+            break
     return None
 
 
@@ -320,37 +327,151 @@ ALIAS_SISTEMA = {"d&d": "dungeons dragons", "ad&d": "advanced dungeons dragons",
 
 
 def coincide_sistema(sistema: str, ficha: dict) -> bool | None:
-    """¿Es del sistema/línea del documento? None si la ficha no dice nada con qué comparar."""
+    """¿Es del sistema/línea del documento? None si la ficha no dice nada con qué comparar.
+
+    Se mira el sistema y la serie de la ficha, no su nombre: «The Bleeding Edge» (de Candela Obscura)
+    no es del juego «Bleeding Edge» por llamarse igual."""
     textos = [*(ficha.get("sistema") or []), *(ficha.get("serie") or [])]
     if not textos:
         return None
-    ns = normalizar(ALIAS_SISTEMA.get(sistema.lower(), sistema)).replace("&", " ")
-    palabras = {w for w in ns.split() if w not in {"the", "of", "and", "a"}}
-    todo = " ".join(normalizar(x).replace("&", " ")
-                    for x in [*textos, ficha.get("nombre") or "", *(ficha.get("alternativos") or [])]).split()
-    return bool(palabras) and all(w in todo for w in palabras)
+    todo = " ".join(normalizar(x).replace("&", " ") for x in textos).split()
+    # Con el nombre largo o con el corto: RPGGeek dice tanto «Dungeons & Dragons» como «D&D 5th Edition».
+    for forma in {ALIAS_SISTEMA.get(sistema.lower(), sistema), sistema}:
+        palabras = {w for w in normalizar(forma).replace("&", " ").split() if w not in {"the", "of", "and", "a"}}
+        if palabras and all(w in todo for w in palabras):
+            return True
+    return False
+
+
+# Palabras que no distinguen una editorial de otra («Sanguine Games» = «Sanguine Productions»).
+EDITORIAL_COMUN = set("""games game publishing publications publication press productions production studio
+studios entertainment inc llc ltd co company design designs media books edition editions the and of""".split())  # noqa: SIM905
+
+
+def misma_editorial(a: str, b: str) -> bool:
+    na, nb = normalizar(a), normalizar(b)
+    if not na or not nb:
+        return False
+    if na in nb or nb in na:
+        return True
+    pa = {w for w in na.split() if w not in EDITORIAL_COMUN and len(w) > 2}
+    pb = {w for w in nb.split() if w not in EDITORIAL_COMUN and len(w) > 2}
+    return bool(pa & pb)
+
+
+# Añadidos de RPGGeek que solo dicen el sistema o la edición: «(HERO)», «(D20 3.5)», «(5e)»,
+# «(HERO System 5)», «(3rd Edition)». No los de otra cosa: «(Kickstarter Preview Edition)».
+RE_ETIQUETA = re.compile(
+    r"\s*\((?![^)]*(preview|kickstarter|ashcan|quick ?start|beta|playtest|demo))[^)]*"
+    r"(\bsystem\b|edition|\bed\b\.?|\b\d(st|nd|rd|th)?e\b|d20|3\.5|\bhero\b|\bharp\b|rolemaster|gurps|"
+    r"savage|pathfinder|\bfate\b|\bosr\b|\bbx\b|revised)[^)]*\)\s*$", re.I)
+
+
+def _lineas(ficha: dict) -> set[str]:
+    return {normalizar(x) for x in [*(ficha.get("sistema") or []), *(ficha.get("serie") or [])] if x}
+
+
+def perfil_vecinos(elegidos: list[tuple[dict, int]]) -> dict:
+    """Editoriales y líneas (sistema/serie de RPGGeek) de los emparejados ya confirmados en la misma
+    carpeta: (ficha elegida, peso) con peso 2 si lo aceptaste tú y 1 si fue automático. Cuenta lo
+    que pesa 2 o más: una confirmación tuya o dos automáticos."""
+    eds: dict[str, int] = {}
+    lineas: dict[str, int] = {}
+    for f, peso in elegidos:
+        for e in {normalizar(x) for x in f.get("editoriales") or [] if x}:
+            eds[e] = eds.get(e, 0) + peso
+        for linea in _lineas(f):
+            lineas[linea] = lineas.get(linea, 0) + peso
+    return {"editoriales": {e for e, n in eds.items() if n >= 2}, "lineas": {x for x, n in lineas.items() if n >= 2}}
+
+
+def coincide_vecinos(perfil: dict | None, ficha: dict) -> int:
+    """Cuántas cosas comparte con lo ya confirmado en la carpeta: 0, 1 (editorial o línea) o 2 (las dos)."""
+    if not perfil:
+        return 0
+    ed = any(misma_editorial(a, b) for a in ficha.get("editoriales") or [] if a for b in perfil["editoriales"])
+    linea = bool(_lineas(ficha) & perfil["lineas"])
+    return int(ed) + int(linea)
+
+
+SIN_EDITORIAL = {"web published", "self published", "unknown", "uncredited"}
+
+
+def coincide_editorial(doc: dict, ficha: dict) -> bool | None:
+    """¿La editorial del documento (de la ruta o del PDF) es una de las de la ficha o sus ediciones?"""
+    nuestras = {e for e in (doc.get("editorial_unif"), doc.get("editorial"), doc.get("ext_editorial")) if e}
+    # «(Web published)» o «(Self-Published)» no dicen de quién es: ni suma ni resta.
+    suyas = [e for e in [*(ficha.get("editoriales") or []),
+                         *(e for v in ficha.get("versiones") or [] for e in v.get("editoriales") or [])]
+             if e and normalizar(e) not in SIN_EDITORIAL]
+    if not nuestras or not suyas:
+        return None
+    return any(misma_editorial(a, b) for a in nuestras for b in suyas)
+
+
+def _sin_parentesis(n: str) -> str:
+    """«The Echoes of Heaven Bestiary (HERO)» -> «The Echoes of Heaven Bestiary»: la etiqueta de
+    sistema que pone RPGGeek para distinguir versiones no hace a una más parecida al título que otra."""
+    return RE_ETIQUETA.sub("", n).strip() or n
+
+
+def es_parte_del_nombre(consulta: str, nombre: str) -> bool:
+    """«Thin Blue Line» en «Thin Blue Line: Defenders of the Colonies», «A is for Assassin» en «Strike to
+    the Heart: A is for Assassin»: el título es el principio del nombre o una de sus partes. No lo es
+    «Behind Lines» en «Behind Enemy Lines»."""
+    q = re.sub(r"^(the|a|an) ", "", normalizar(consulta))
+    if len(q.split()) < 2:
+        return False
+    partes = [re.sub(r"^(the|a|an) ", "", normalizar(x)) for x in re.split(r"[:(]", nombre)]
+    entero = re.sub(r"^(the|a|an) ", "", normalizar(nombre))
+    return q in partes or entero.startswith(q + " ") or entero.endswith(" " + q)
+
+
+def parecido_nombre(consultas: list[str], ficha: dict) -> float:
+    """Parecido del nombre sin la etiqueta de sistema: para ver si dos candidatos «se llaman igual»."""
+    nombres = [ficha.get("nombre") or "", *(ficha.get("alternativos") or [])]
+    return max((_parecido(q, _sin_parentesis(n)) for q in consultas for n in nombres), default=0.0)
+
+
+RE_ACCESORIO = re.compile(r"\b(errata|erratas|faq|corrections?|update|actualizaci[oó]n|web enhancement|"
+                          r"character sheets?|record sheets?|preview|teaser|sampler)\b", re.I)
 
 
 def puntuar(doc: dict, ficha: dict, consultas: list[str]) -> float:
+    """Parecido del documento con una ficha. Puede pasar de 1: así se ordenan los que empatarían
+    a 1 (al guardarlo se recorta)."""
     nombres = [ficha["nombre"], *ficha.get("alternativos", [])]
     es_juego = ficha.get("tipo") == "boardgame"
+    sistema = doc.get("sistema")
+    coincide = coincide_sistema(sistema, ficha) if sistema and not es_juego else None
     # Un juego de mesa tiene que llamarse igual: «Star Wars» no es «Clue: Star Wars»…
     p = max((_parecido(c, n, not es_juego) for c in consultas for n in nombres), default=0.0)
     # …salvo el subtítulo: «Mordheim» es «Mordheim: City of the Damned».
-    if es_juego and any(":" in n and normalizar(n.split(":")[0]) == normalizar(c)
-                        for c in consultas for n in nombres):
+    # En rol también: «Bleeding Edge» es «Bleeding Edge: High-Tech Low-Life Role-Play».
+    if any(":" in n and normalizar(n.split(":")[0]) == normalizar(c) for c in consultas[:1] for n in nombres):
         p = max(p, 0.95)
     # Si solo cuadra una parte del título («… - The Invisible World»), hace falta que lo confirme
     # la editorial, el sistema o la edición; si no, que lo mire una persona.
-    p_entero = max((_parecido(consultas[0], n, not es_juego) for n in nombres), default=0.0) if consultas else 0.0
+    # El título entero es la primera consulta… o esa sin el sistema delante («Star Drive Arms &
+    # Equipment Guide» es «Arms & Equipment Guide» de la línea Star Drive).
+    enteras = consultas[:1]
+    ns = normalizar(doc.get("sistema") or "")
+    if consultas and ns and coincide is not False:  # y si RPGGeek no dice que es de otro sistema
+        enteras += [q for q in consultas[1:] if normalizar(f"{ns} {q}") == normalizar(consultas[0])]
+    p_entero = max((_parecido(q, n, not es_juego) for q in enteras for n in nombres), default=0.0)
     confirmado = False
 
     version, por = version_que_coincide(doc, ficha)
     if version:  # el mismo ISBN o código de producto que una edición de esa ficha
         p += 0.3 if por == "isbn" else 0.15
         confirmado = True
+    # Páginas (las del PDF, que no vienen de RPGGeek): las mismas casi lo confirman.
     paginas = doc.get("paginas")
-    if paginas and any(v.get("paginas") and abs(v["paginas"] - paginas) <= 2 for v in ficha.get("versiones") or []):
+    pags = [v["paginas"] for v in ficha.get("versiones") or [] if v.get("paginas")]
+    # Con pocas páginas coincide cualquiera (hay cientos de PDF de 3 páginas).
+    if paginas and paginas >= 24 and paginas in pags:
+        p += 0.06
+    elif paginas and paginas >= 8 and any(abs(x - paginas) <= 2 for x in pags):
         p += 0.03
 
     anio_doc = doc.get("publicado") or doc.get("anio") or None
@@ -360,27 +481,31 @@ def puntuar(doc: dict, ficha: dict, consultas: list[str]) -> float:
         # En un wargame o juego de mesa el PDF puede ser un suplemento muy posterior al juego: no resta.
         p += 0.06 if dif <= 1 else (-0.15 if dif > 3 and not es_juego else 0)
 
-    editorial = doc.get("editorial_unif") or doc.get("editorial") or doc.get("ext_editorial")
-    editoriales = [*(ficha.get("editoriales") or []),
-                   *(e for v in ficha.get("versiones") or [] for e in v.get("editoriales") or [])]
-    if editorial and editoriales:
-        ne = normalizar(editorial)
-        if any(ne in normalizar(e) or normalizar(e) in ne for e in editoriales if e):
-            p += 0.06
-            confirmado = True
+    ed = coincide_editorial(doc, ficha)
+    if ed:
+        p += 0.06
+        confirmado = True
+    elif ed is False:
+        p -= 0.06  # de otra editorial (o publicado por un aficionado en la web)
 
-    sistema = doc.get("sistema")
     if sistema and not es_juego:
-        coincide = coincide_sistema(sistema, ficha)
         if coincide:
             # Poco: muchas veces el sistema ya va en el título que se ha buscado («Star Trek DS9…»).
             p += 0.04
             confirmado = True
         elif coincide is False:
             p -= 0.06  # RPGGeek dice que es de otro sistema
+    # Lo que ya has confirmado en la misma carpeta (misma editorial y misma línea de RPGGeek).
+    vecinos = coincide_vecinos(doc.get("vecinos"), ficha)
+    if vecinos:  # suma, pero no basta para dar por bueno un título que solo cuadra en parte
+        p += 0.08 if vecinos == 2 else 0.03
     if p_entero < 0.9 and not confirmado and len(consultas) > 1:
         p -= 0.1
-    return round(min(p, 1.0), 3)
+    # Un nombre de una palabra («Bard», «Threads», «Polaris») lo llevan muchas cosas: sin nada que lo
+    # confirme no basta para darlo por bueno.
+    if not confirmado and not es_juego and max(len(normalizar(n).split()) for n in nombres if n) <= 1:
+        p -= 0.05
+    return round(p, 3)
 
 
 def emparejar(cliente: Cliente, doc: dict) -> dict:
@@ -419,9 +544,43 @@ def emparejar(cliente: Cliente, doc: dict) -> dict:
         key=lambda f: -f["puntos"],
     )
     mejor = puntuados[0]
-    # Dos candidatos casi iguales (reediciones, versiones): mejor que lo mire una persona.
-    empate = len(puntuados) > 1 and puntuados[1]["puntos"] >= mejor["puntos"] - 0.02
-    if mejor["puntos"] >= UMBRAL_AUTO and not empate:
+    # Dos candidatos casi iguales (reediciones, versiones): mejor que lo mire una persona. Si se
+    # llaman igual («Bard», «Threads»), hace falta que los datos del PDF marquen bien la diferencia.
+    empate = False
+    if len(puntuados) > 1:
+        otro = puntuados[1]
+        mismo_nombre = parecido_nombre(consultas, otro) >= parecido_nombre(consultas, mejor) - 0.01
+        ventaja = mejor["puntos"] - otro["puntos"]
+        empate = (ventaja < (MARGEN_MISMO_NOMBRE if mismo_nombre else 0.02)
+                  # los dos casi perfectos: hace falta una ventaja clara («Ghostwalk» 1,18 frente a
+                  # «Ghostwalk Web Enhancement» 1,00 sí la tiene)
+                  or (min(otro["puntos"], 1.0) >= min(mejor["puntos"], 1.0) - 0.02 and ventaja < 0.1))
+    # Solo se ha podido buscar el sistema («All Flesh Must Be Eaten» para «… Errata»): será otra cosa
+    # de esa línea, no el básico; que lo mire una persona.
+    solo_sistema = bool(consultas) and normalizar(consultas[0]) == normalizar(doc.get("sistema") or "")         and len(normalizar(RE_COLETILLA.sub("", limpiar_titulo(doc.get("titulo") or ""))).split())         > len(normalizar(consultas[0]).split())
+    # Sabemos la editorial y no es la de la ficha: que lo mire una persona.
+    # Salvo que lo confirmen el sistema o lo ya emparejado en la carpeta: la carpeta puede decir la
+    # dueña del juego (R. Talsorian) y el módulo ser de otra (Atlas Games).
+    otra_editorial = (tipo != "boardgame" and coincide_editorial(doc, mejor) is False
+                      and not coincide_vecinos(doc.get("vecinos"), mejor)
+                      and not (doc.get("sistema") and coincide_sistema(doc["sistema"], mejor)))
+    # Una errata, una actualización o unas hojas sueltas no son el libro («Oriental Adventures Errata»);
+    # y con el nombre a medias («Behind Lines» / «Behind Enemy Lines») no basta lo de alrededor
+    # (editorial, año, carpeta): solo el ISBN o el código de producto. En wargames y juegos de mesa sí
+    # vale: la ficha de BGG es la del juego y la errata o el suplemento van con él.
+    dudoso = False
+    if tipo != "boardgame":
+        nombres_mejor = [mejor.get("nombre") or "", *(mejor.get("alternativos") or [])]
+        dudoso = bool(RE_ACCESORIO.search(doc.get("titulo") or "")
+                      and not any(RE_ACCESORIO.search(n) for n in nombres_mejor))
+        # Un nombre de una palabra («Bard», «Polaris», «Nemesis») lo llevan muchas cosas: el sistema no
+        # basta, hace falta la editorial, el ISBN o el código.
+        una_palabra = max(len(re.sub(r"^(the|a|an) ", "", normalizar(n)).split()) for n in nombres_mejor if n) <= 1
+        dudoso = dudoso or (una_palabra and not coincide_editorial(doc, mejor) and not version_que_coincide(doc, mejor)[0]
+                            and coincide_vecinos(doc.get("vecinos"), mejor) < 2)
+        dudoso = dudoso or (parecido_nombre(consultas, mejor) < 0.9 and not version_que_coincide(doc, mejor)[0]
+                            and not any(es_parte_del_nombre(q, n) for q in consultas for n in nombres_mejor))
+    if mejor["puntos"] >= UMBRAL_AUTO and not (empate or solo_sistema or otra_editorial or dudoso):
         estado = "auto"
     elif tipo == "boardgame":
         # Wargames y juegos de mesa: sin revisión a mano; o el juego coincide o no se apunta nada.
@@ -430,6 +589,8 @@ def emparejar(cliente: Cliente, doc: dict) -> dict:
         estado = "pendiente"
     else:
         estado = "sin_resultado"
+    for f in puntuados:  # lo que se guarda y se enseña, de 0 a 1
+        f["raw"], f["puntos"] = f["puntos"], min(f["puntos"], 1.0)
     version, por = version_que_coincide(doc, mejor)
     if version and version.get("anio"):
         # Es esa edición concreta: su año es el de este PDF (el de la ficha es el de la primera).

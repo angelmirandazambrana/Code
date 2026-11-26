@@ -223,3 +223,39 @@ def test_no_se_confirma_con_sus_propios_datos():
     doc = {"titulo": "Star Trek DS9 Corebook", "categoria": "Rol", "sistema": "Star Trek", "publicado": 2018,
            "ext_editorial": "X", "origen": '{"publicado": "geek", "editorial": "geek"}'}
     assert geek.emparejar(c, doc)["estado"] == "pendiente"
+
+
+def test_reglas_aprendidas_de_las_revisiones():
+    from biblioteca_rpg import geek as g
+    # «D&D» delante del título se quita al buscar y RPGGeek lo nombra de las dos formas.
+    assert g._sin_sistema("D&D The Thunder Below", "D&D") == "The Thunder Below"
+    assert g.coincide_sistema("D&D", {"sistema": ["5e Game System Product (D&D 5th Edition Compatible)"]})
+    assert g.coincide_sistema("D&D", {"sistema": ["Dungeons & Dragons (3.5 Edition)"]})
+    assert g.coincide_sistema("D&D", {"sistema": ["Pathfinder"]}) is False
+    # El sistema se mira en el sistema/serie de la ficha, no en su nombre.
+    assert g.coincide_sistema("Bleeding Edge", {"nombre": "The Bleeding Edge", "sistema": ["Candela Obscura"]}) is False
+    # Editoriales parecidas cuentan; «(Web published)» no dice nada.
+    assert g.misma_editorial("Sanguine Productions", "Sanguine Games")
+    assert not g.misma_editorial("Wizards of the Coast", "Paizo Publishing")
+    assert g.coincide_editorial({"editorial": "Wizards of the Coast"}, {"editoriales": ["(Web published)"]}) is None
+    # Partes de un nombre: sí «Thin Blue Line: …», no «Behind Enemy Lines».
+    assert g.es_parte_del_nombre("Thin Blue Line", "Thin Blue Line: Defenders of the Colonies")
+    assert g.es_parte_del_nombre("A is for Assassin", "Strike to the Heart: A is for Assassin")
+    assert not g.es_parte_del_nombre("Behind Lines", "Behind Enemy Lines")
+    # Etiquetas de sistema de RPGGeek, sí; otros añadidos, no.
+    assert g._sin_parentesis("Star Hero (HERO System 5)") == "Star Hero"
+    assert g._sin_parentesis("Hillfolk (Kickstarter Preview Edition)") == "Hillfolk (Kickstarter Preview Edition)"
+    assert g.RE_ACCESORIO.search("Oriental Adventures Errata") and not g.RE_ACCESORIO.search("Fiend Folio")
+
+
+def test_lo_confirmado_en_la_carpeta_ayuda():
+    from biblioteca_rpg import geek as g
+    tsr = {"editoriales": ["Tactical Studies Rules (TSR)"], "sistema": ["Alternity"]}
+    perfil = g.perfil_vecinos([(tsr, 2)])  # una aceptada a mano basta
+    assert g.coincide_vecinos(perfil, tsr) == 2
+    assert g.coincide_vecinos(perfil, {"editoriales": ["Wizards of the Coast"], "sistema": ["Star Wars"]}) == 0
+    assert g.perfil_vecinos([(tsr, 1)])["editoriales"] == set()  # un solo automático no basta
+    ficha = {"nombre": "Arms & Equipment Guide", "versiones": [], **tsr}
+    doc = {"titulo": "Star Drive Arms & Equipment Guide", "sistema": "Star Drive"}
+    q = g.variantes(doc["titulo"], doc["sistema"])
+    assert g.puntuar({**doc, "vecinos": perfil}, ficha, q) > g.puntuar(doc, ficha, q)

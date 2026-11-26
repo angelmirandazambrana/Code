@@ -183,6 +183,57 @@ def pasada_codigos(con, cfg, limite: int | None = None, solo: list[str] | None =
 
 # --- RPGGeek / BGG -------------------------------------------------------------
 
+def vecinos_geek(con, carpeta: str, sin: int | None = None, cache: dict | None = None) -> dict:
+    """Perfil de lo ya emparejado en esa carpeta (lo que aceptaste pesa el doble que lo automático)."""
+    if cache is not None and carpeta in cache:
+        elegidos = cache[carpeta]
+    else:
+        elegidos = []
+        for doc_id, estado, datos in con.execute(
+                "SELECT e.doc_id, e.estado, e.datos FROM extra e JOIN docs d ON d.id = e.doc_id "
+                "WHERE d.carpeta = ? AND e.fuente = 'geek' AND e.estado IN ('aceptado', 'auto')", (carpeta,)):
+            elegido = json.loads(datos).get("elegido")
+            if elegido:
+                elegidos.append((doc_id, elegido, 2 if estado == "aceptado" else 1))
+        if cache is not None:
+            cache[carpeta] = elegidos
+    return geek_mod.perfil_vecinos([(el, peso) for i, el, peso in elegidos if i != sin])
+
+
+def reevaluar_geek(con, estados=("pendiente",), cliente=None, limite: int | None = None) -> dict:
+    """Vuelve a emparejar los que están en esos estados con el método actual (casi todo sale de la
+    caché de BGG). No toca lo que has decidido tú (aceptado/rechazado)."""
+    estados = [e for e in estados if e not in ("aceptado", "rechazado")]
+    filas = [dict(f) for f in con.execute(
+        f"SELECT d.* FROM docs d JOIN extra e ON e.doc_id = d.id AND e.fuente = 'geek' "
+        f"WHERE e.estado IN ({','.join('?' * len(estados))}) ORDER BY d.id", estados)]
+    if limite:
+        filas = filas[:limite]
+    cliente = cliente or geek_mod.Cliente(con)
+    cache: dict = {}
+    cuenta: dict = {}
+    for i, doc in enumerate(filas, 1):
+        doc["vecinos"] = vecinos_geek(con, doc["carpeta"], doc["id"], cache)
+        try:
+            r = geek_mod.emparejar(cliente, doc)
+        except geek_mod.SinToken:
+            raise
+        except Exception as ex:
+            print(f"  error con {doc['ruta']}: {type(ex).__name__}: {ex}", file=sys.stderr)
+            continue
+        cuenta[r["estado"]] = cuenta.get(r["estado"], 0) + 1
+        with con:
+            con.execute("UPDATE extra SET estado=?, confianza=?, ref=?, datos=? WHERE doc_id=? AND fuente='geek' "
+                        "AND estado NOT IN ('aceptado', 'rechazado')",
+                        (r["estado"], r["confianza"], r["ref"], geek_mod.a_json(r["datos"]), doc["id"]))
+            aplicar(con, [doc["id"]])
+        if r["estado"] == "auto":
+            cache.pop(doc["carpeta"], None)  # cuenta para los siguientes de la carpeta
+        if i % 200 == 0:
+            print(f"  {i}/{len(filas)}  {cuenta}  peticiones {cliente.peticiones}", flush=True)
+    return cuenta
+
+
 def pasada_geek(con, limite: int | None = None, minutos: float | None = None, muestra: int | None = None,
                 solo: list[str] | None = None, cliente=None) -> dict:
     categorias = list(geek_mod.TIPO_POR_CATEGORIA)
@@ -207,6 +258,7 @@ def pasada_geek(con, limite: int | None = None, minutos: float | None = None, mu
         if fin and time.time() > fin:
             print("  tiempo agotado; se sigue en la próxima pasada")
             break
+        doc["vecinos"] = vecinos_geek(con, doc["carpeta"], doc["id"])
         try:
             r = geek_mod.emparejar(cliente, doc)
         except geek_mod.SinToken:
@@ -381,7 +433,7 @@ def resumen(con) -> None:
 
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description="Completa el catálogo con datos del PDF y de RPGGeek/BGG.")
-    ap.add_argument("orden", choices=["pdf", "codigos", "geek", "aplicar", "resumen"])
+    ap.add_argument("orden", choices=["pdf", "codigos", "geek", "reevaluar", "aplicar", "resumen"])
     ap.add_argument("--limite", type=int)
     ap.add_argument("--minutos", type=float, help="geek: parar tras estos minutos")
     ap.add_argument("--muestra", type=int, help="geek: documentos al azar (para probar)")
@@ -400,6 +452,8 @@ def main(argv=None) -> None:
             print("RPGGeek/BGG:", pasada_geek(con, args.limite, args.minutos, args.muestra, args.solo))
         except geek_mod.SinToken as ex:
             print(f"RPGGeek/BGG: no se consulta. {ex}")
+    elif args.orden == "reevaluar":
+        print("Reevaluados:", reevaluar_geek(con, limite=args.limite), f"({time.time() - t:.0f} s)")
     elif args.orden == "aplicar":
         with con:
             print("Cambiados:", aplicar(con))
