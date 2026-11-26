@@ -216,8 +216,47 @@ def ficha(request: Request, doc_id: int):
         "a_mano": manual_mod.valores(con, [doc_id]).get(doc_id, {}), "campos": manual_mod.CAMPOS,
         "valor_de": lambda c: _valor_campo(d, c), "error": request.query_params.get("error", ""),
         "guardado": request.query_params.get("guardado", ""),
-        "meses": MESES,
+        "meses": MESES, "revisado": _revisado(con, request.query_params.get("revisado", "")),
+        "siguiente_revisar": _siguiente_revisar(con, doc_id),
+        "por_revisar": con.execute("SELECT COUNT(*) FROM extra WHERE fuente='geek' AND estado='pendiente'"
+                                   ).fetchone()[0],
     })
+
+
+def _siguiente_revisar(con, tras: int | None = None) -> int | None:
+    """El siguiente emparejado con RPGGeek/BGG por revisar, en el orden de /revisar (más seguros
+    primero), después de `tras`; si no hay más detrás, vuelve al principio."""
+    orden = "ORDER BY e.confianza DESC, e.doc_id LIMIT 1"
+    base = "SELECT e.doc_id FROM extra e WHERE e.fuente='geek' AND e.estado='pendiente' AND e.doc_id<>?"
+    yo = con.execute("SELECT confianza FROM extra WHERE doc_id=? AND fuente='geek'", (tras,)).fetchone() if tras else None
+    if yo and yo[0] is not None:
+        fila = con.execute(f"{base} AND (e.confianza < ? OR (e.confianza = ? AND e.doc_id > ?)) {orden}",
+                           (tras, yo[0], yo[0], tras)).fetchone()
+        if fila:
+            return fila[0]
+    fila = con.execute(f"{base} {orden}", (tras or 0,)).fetchone()
+    return fila[0] if fila else None
+
+
+def _revisado(con, valor: str) -> dict | None:
+    """El que se acaba de decidir (para el aviso «Guardado» con enlace para corregirlo)."""
+    if not valor.isdigit():
+        return None
+    fila = con.execute("SELECT d.id, d.titulo, e.estado, e.datos FROM docs d JOIN extra e ON e.doc_id=d.id "
+                       "AND e.fuente='geek' WHERE d.id=?", (int(valor),)).fetchone()
+    if not fila or fila["estado"] not in ("aceptado", "rechazado"):
+        return None
+    elegido = (json.loads(fila["datos"]).get("elegido") or {}) if fila["estado"] == "aceptado" else {}
+    return {"id": fila["id"], "titulo": fila["titulo"], "estado": fila["estado"], "elegido": elegido.get("nombre")}
+
+
+@app.get("/revisar/siguiente")
+def revisar_siguiente(tras: int | None = None):
+    """Salta a la ficha del siguiente por revisar (tras decidir `tras`, con el aviso de lo guardado)."""
+    sig = _siguiente_revisar(_con(), tras)
+    if sig is None:
+        return RedirectResponse("/revisar", status_code=303)
+    return RedirectResponse(f"/libro/{sig}" + (f"?revisado={tras}" if tras else "") + "#bgg", status_code=303)
 
 
 MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre",
@@ -339,8 +378,9 @@ def decidir(doc_id: int, accion: str, ref: int | None = None, volver: str = "/re
     else:
         estado, ref_txt = "rechazado", None
     with con:
-        con.execute("UPDATE extra SET estado=?, ref=?, datos=? WHERE doc_id=? AND fuente='geek'",
-                    (estado, ref_txt, json.dumps(datos, ensure_ascii=False), doc_id))
+        est_mod.crear(con)
+        con.execute("UPDATE extra SET estado=?, ref=?, datos=?, decidido_en=? WHERE doc_id=? AND fuente='geek'",
+                    (estado, ref_txt, json.dumps(datos, ensure_ascii=False), int(time.time()), doc_id))
         aplicar(con, [doc_id])
     destino = volver if volver.startswith("/") and not volver.startswith("//") else "/revisar"
     return RedirectResponse(destino, status_code=303)

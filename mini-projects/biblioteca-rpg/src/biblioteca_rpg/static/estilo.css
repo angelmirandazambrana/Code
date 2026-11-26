@@ -439,3 +439,11 @@ form.en-linea { display: inline; margin: 0; }
 .tabla-est table { border-collapse: collapse; margin-top: 8px; font-variant-numeric: tabular-nums; font-size: 14px; }
 .tabla-est th, .tabla-est td { padding: 4px 10px; border-bottom: 1px solid var(--borde); text-align: right; }
 .tabla-est th:first-child, .tabla-est td:first-child { text-align: left; }
+kbd {
+  font: 11px/1 ui-monospace, monospace; padding: 2px 5px; border: 1px solid var(--borde);
+  border-bottom-width: 2px; border-radius: 4px; background: var(--fondo); color: var(--tenue);
+}
+.ayuda-teclas { font-size: 13px; margin: 8px 0 0; }
+.aviso-revisado a { text-decoration: underline; }
+@media (hover: none) { .ayuda-teclas, .candidatos kbd { display: none; } }
+#bgg { scroll-margin-top: 90px; }

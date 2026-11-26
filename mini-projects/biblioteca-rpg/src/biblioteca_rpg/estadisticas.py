@@ -28,6 +28,9 @@ MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "
 
 def crear(con) -> None:
     con.executescript(ESQUEMA)
+    # Cuándo aceptaste o rechazaste un emparejado de RPGGeek/BGG (los anteriores a esto no lo tienen).
+    if "decidido_en" not in {f[1] for f in con.execute("PRAGMA table_info(extra)")}:
+        con.execute("ALTER TABLE extra ADD COLUMN decidido_en INTEGER")
 
 
 def fotografiar(con, ahora: float | None = None, forzar: bool = False) -> bool:
@@ -149,6 +152,29 @@ def serie(con, desde: date, hasta: date, agrupar: str, ahora: float | None = Non
             continue
         en_entrada.append(sum(1 for lleg, dec in vivos if lleg < fin and (dec is None or dec >= fin)))
 
+    # RPGGeek/BGG: emparejados solos (por cuándo se buscaron) y decididos por ti (por cuándo lo
+    # decidiste; los de antes de apuntarlo, por cuándo se buscaron). Por revisar al final de cada periodo.
+    geek_auto, geek_si, geek_no = [0] * n, [0] * n, [0] * n
+    geek = con.execute("SELECT estado, creado_en, decidido_en FROM extra WHERE fuente='geek' "
+                       "AND estado IN ('auto', 'aceptado', 'rechazado', 'pendiente')").fetchall()
+    revisables = []
+    for estado, creado, decidido in geek:
+        if estado == "auto":
+            if (i := cubo(creado)) is not None:
+                geek_auto[i] += 1
+            continue
+        if estado == "pendiente":
+            revisables.append((creado, None))
+        elif decidido:
+            revisables.append((creado, decidido))
+        if estado != "pendiente" and (i := cubo(decidido or creado)) is not None:
+            (geek_si if estado == "aceptado" else geek_no)[i] += 1
+    por_revisar = []
+    for i in range(n):
+        fin = min(limites[i + 1], ahora)
+        por_revisar.append(None if limites[i] > ahora else sum(
+            1 for c, d in revisables if c and c < fin and (d is None or d >= fin)))
+
     # De las fotos: la última de cada periodo.
     fotos = con.execute("SELECT dia, docs, por_clasificar, revisar FROM fotos WHERE dia BETWEEN ? AND ? ORDER BY dia",
                         (desde.isoformat(), hasta.isoformat())).fetchall()
@@ -163,6 +189,8 @@ def serie(con, desde: date, hasta: date, agrupar: str, ahora: float | None = Non
         "etiquetas": [etiqueta(p, agrupar) for p in periodos],
         "llegados": llegados, "solos": solos, "a_mano": a_mano, "duplicados": duplicados,
         "en_entrada": en_entrada, "docs": docs, "por_clasificar": por_clasificar, "revisar": revisar,
+        "geek_auto": geek_auto, "geek_si": geek_si, "geek_no": geek_no, "por_revisar": por_revisar,
         "totales": {"llegados": sum(llegados), "solos": sum(solos), "a_mano": sum(a_mano),
-                    "duplicados": sum(duplicados)},
+                    "duplicados": sum(duplicados), "geek_auto": sum(geek_auto), "geek_si": sum(geek_si),
+                    "geek_no": sum(geek_no)},
     }

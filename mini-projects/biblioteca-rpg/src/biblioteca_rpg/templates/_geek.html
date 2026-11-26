@@ -1,5 +1,5 @@
 {# Candidatos de RPGGeek/BGG con botones para confirmar o descartar. #}
-{% macro candidatos(doc_id, datos, volver) %}
+{% macro candidatos(doc_id, datos, volver, teclas=false) %}
   <ul class="candidatos">
     {% for c in datos.candidatos or [] %}
       <li>
@@ -10,12 +10,12 @@
           <span class="confianza" title="Parecido con el título del fichero">{{ ((c.puntos or 0) * 100)|round|int }}%</span>
         </div>
         <form method="post" action="/revisar/{{ doc_id }}?accion=aceptar&ref={{ c.id }}&volver={{ volver|qp }}">
-          <button class="boton mini" type="submit">Es este</button>
+          <button class="boton mini" type="submit"{% if teclas and loop.index <= 9 %} data-tecla="{{ loop.index }}"{% endif %}>Es este{% if teclas and loop.index <= 9 %} <kbd>{{ loop.index }}</kbd>{% endif %}</button>
         </form>
       </li>
     {% endfor %}
   </ul>
   <form method="post" action="/revisar/{{ doc_id }}?accion=rechazar&volver={{ volver|qp }}">
-    <button class="boton mini" type="submit">Ninguno es</button>
+    <button class="boton mini" type="submit"{% if teclas %} data-tecla="0"{% endif %}>Ninguno es{% if teclas %} <kbd>0</kbd>{% endif %}</button>
   </form>
 {% endmacro %}

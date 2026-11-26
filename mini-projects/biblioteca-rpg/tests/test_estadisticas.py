@@ -48,3 +48,20 @@ def test_semanas_meses_y_fotos(tmp_path):
     assert s["periodos"][0] == "2026-10-26" and s["llegados"][:2] == [0, 5]
     assert s["por_clasificar"][1] == 1 and s["docs"][1] == 2 and s["por_clasificar"][2] is None
     assert s["en_entrada"][2] is None  # semana que aún no ha llegado
+
+
+def test_enlaces_bgg(tmp_path):
+    con = _con(tmp_path)
+    est.crear(con)
+    with con:
+        for i, (e, c, d) in enumerate([("auto", _ts(2026, 11, 2, 9), None),
+                                       ("pendiente", _ts(2026, 11, 2, 9), None),
+                                       ("aceptado", _ts(2026, 11, 2, 9), _ts(2026, 11, 4, 9)),
+                                       ("rechazado", _ts(2026, 11, 3, 9), None)], 1):
+            con.execute("INSERT INTO docs (id, ruta) VALUES (?, ?)", (100 + i, f"x{i}.pdf"))
+            con.execute("INSERT INTO extra (doc_id, fuente, estado, creado_en, decidido_en) VALUES (?, 'geek', ?, ?, ?)",
+                        (100 + i, e, c, d))
+    s = est.serie(con, date(2026, 11, 1), date(2026, 11, 5), "dia", ahora=_ts(2026, 11, 5, 12))
+    assert s["geek_auto"] == [0, 1, 0, 0, 0]
+    assert s["geek_si"] == [0, 0, 0, 1, 0] and s["geek_no"] == [0, 0, 1, 0, 0]
+    assert s["por_revisar"] == [0, 2, 2, 1, 1]

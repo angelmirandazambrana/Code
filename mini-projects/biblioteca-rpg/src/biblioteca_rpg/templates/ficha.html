@@ -125,10 +125,25 @@
         </form>
       </div>
     {% elif g and g.estado == 'pendiente' %}
-      <div class="geek">
+      <div class="geek" id="bgg" data-teclas-bgg>
         <p>¿Es alguno de estos en {{ nombre_geek }}?</p>
-        {{ candidatos(d.id, g.datos, volver) }}
+        {{ candidatos(d.id, g.datos, '/revisar/siguiente?tras=' ~ d.id, teclas=true) }}
+        <p class="tenue ayuda-teclas">Al elegir pasas al siguiente por revisar ({{ por_revisar }} pendientes).
+          Teclas: <kbd>1</kbd>…<kbd>9</kbd> elegir · <kbd>0</kbd> ninguno · <kbd>→</kbd> saltar sin decidir.</p>
       </div>
+    {% endif %}
+    {% if revisado %}
+      <p class="hecho aviso-revisado">✓ Guardado «<a href="/libro/{{ revisado.id }}">{{ revisado.titulo }}</a>»:
+        {{ ('es ' ~ revisado.elegido) if revisado.estado == 'aceptado' else 'ninguno era' }}.
+        <a href="/libro/{{ revisado.id }}">Corregir</a></p>
+    {% endif %}
+    {% if (g and g.estado == 'pendiente') or revisado %}
+      {% if siguiente_revisar and siguiente_revisar != d.id %}
+        <p><a class="boton mini" href="/libro/{{ siguiente_revisar }}#bgg" data-siguiente-bgg>Siguiente por revisar →</a>
+          <a class="tenue" href="/revisar">Ver la lista</a></p>
+      {% elif not siguiente_revisar %}
+        <p class="hecho">No queda nada por revisar con {{ nombre_geek }}. 🎉</p>
+      {% endif %}
     {% endif %}
 
     <p class="externos">Buscar fuera:

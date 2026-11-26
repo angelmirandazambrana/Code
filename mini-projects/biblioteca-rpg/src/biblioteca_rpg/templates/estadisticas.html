@@ -27,6 +27,7 @@
     <div class="cifra"><span class="valor">{{ "{:,}".format(foto.docs).replace(",", ".") }}</span><span class="nombre">documentos en la biblioteca</span></div>
     <div class="cifra"><span class="valor">{{ "{:,}".format(foto.por_clasificar).replace(",", ".") }}</span><span class="nombre">en carpetas «_Por clasificar»</span></div>
     <div class="cifra"><span class="valor">{{ "{:,}".format(foto.entrada).replace(",", ".") }}</span><span class="nombre"><a href="/entrada">en la Entrada sin decidir</a></span></div>
+    <div class="cifra"><span class="valor">{{ "{:,}".format(foto.revisar).replace(",", ".") }}</span><span class="nombre"><a href="/revisar">enlaces con BGG por revisar</a></span></div>
     <div class="cifra"><span class="valor">{{ "{:,}".format((t.solos or 0) + (t.a_mano or 0)).replace(",", ".") }}</span><span class="nombre">clasificados en estas fechas</span></div>
   </div>
 
@@ -52,18 +53,30 @@
         {% if primera_foto %}Se apunta una vez al día desde el {{ primera_foto.split("-")|reverse|join("/") }}; antes no hay datos.{% endif %}</p></figcaption>
       <div class="lienzo" data-grafico="linea" data-series="por_clasificar" data-nombres="Por clasificar"></div>
     </figure>
+    <figure class="grafico">
+      <figcaption><h2>Enlaces con RPGGeek / BGG</h2><p class="tenue">{{ t.geek_auto }} enlazados solos, {{ t.geek_si }} aceptados y {{ t.geek_no }} rechazados por ti.
+        Las decisiones de antes del 23/11/2026 cuentan el día en que se buscó.</p></figcaption>
+      <div class="lienzo" data-grafico="barras" data-series="geek_auto,geek_si,geek_no"
+           data-nombres="Enlazados solos|Aceptados por ti|Rechazados por ti"></div>
+    </figure>
+    <figure class="grafico">
+      <figcaption><h2>Enlaces con BGG por revisar</h2><p class="tenue">Al final de cada periodo. <a href="/revisar">Revisarlos →</a></p></figcaption>
+      <div class="lienzo" data-grafico="linea" data-series="por_revisar" data-nombres="Por revisar"></div>
+    </figure>
   </div>
 
   <details class="tabla-est">
     <summary>Ver como tabla</summary>
     <div class="desplazable">
     <table>
-      <thead><tr><th>Periodo</th><th>Llegados</th><th>Solos</th><th>Por ti</th><th>Duplicados</th><th>Sin decidir</th><th>Por clasificar</th><th>Biblioteca</th></tr></thead>
+      <thead><tr><th>Periodo</th><th>Llegados</th><th>Solos</th><th>Por ti</th><th>Duplicados</th><th>Sin decidir</th><th>BGG solos</th><th>BGG aceptados</th><th>BGG rechazados</th><th>BGG por revisar</th><th>Por clasificar</th><th>Biblioteca</th></tr></thead>
       <tbody>
         {% for i in range(datos.periodos|length)|reverse %}
           <tr><td>{{ datos.etiquetas[i] }}</td><td>{{ datos.llegados[i] }}</td><td>{{ datos.solos[i] }}</td>
             <td>{{ datos.a_mano[i] }}</td><td>{{ datos.duplicados[i] }}</td>
             <td>{{ datos.en_entrada[i] if datos.en_entrada[i] is not none else '—' }}</td>
+            <td>{{ datos.geek_auto[i] }}</td><td>{{ datos.geek_si[i] }}</td><td>{{ datos.geek_no[i] }}</td>
+            <td>{{ datos.por_revisar[i] if datos.por_revisar[i] is not none else '—' }}</td>
             <td>{{ datos.por_clasificar[i] if datos.por_clasificar[i] is not none else '—' }}</td>
             <td>{{ datos.docs[i] if datos.docs[i] is not none else '—' }}</td></tr>
         {% endfor %}

@@ -378,3 +378,41 @@ document.querySelectorAll("[data-valores]").forEach((input) => {
   input.addEventListener("focus", pedir);
   input.addEventListener("input", () => { clearTimeout(temporizador); temporizador = setTimeout(pedir, 150); });
 });
+
+// Revisar el enlace con RPGGeek/BGG desde la ficha: 1-9 elige, 0 ninguno, → salta al siguiente.
+(() => {
+  const caja = document.querySelector("[data-teclas-bgg]");
+  const siguiente = document.querySelector("[data-siguiente-bgg]");
+  if (!caja && !siguiente) return;
+  // El salto a #bgg se hace antes de que carguen las portadas y queda descolocado: repetirlo al final.
+  // La página cambia de alto mientras carga: se recoloca durante 2 s, salvo que muevas tú la página.
+  if (location.hash === "#bgg") {
+    const destino = caja || siguiente;
+    let tocado = false;
+    const ir = () => { if (!tocado) destino.scrollIntoView({ block: "start" }); };
+    for (const ev of ["wheel", "touchstart", "keydown", "mousedown"]) {
+      window.addEventListener(ev, () => { tocado = true; }, { once: true, passive: true });
+    }
+    const vigia = new ResizeObserver(ir);
+    vigia.observe(document.body);
+    ir();
+    window.addEventListener("load", ir);
+    setTimeout(() => vigia.disconnect(), 2000);
+  }
+  document.addEventListener("keydown", (ev) => {
+    if (ev.ctrlKey || ev.metaKey || ev.altKey || ev.repeat) return;
+    const t = ev.target;
+    if (t.closest && t.closest("input, textarea, select, [contenteditable], details[open]")) return;
+    if (ev.key === "ArrowRight" && siguiente) {
+      ev.preventDefault();
+      location.href = siguiente.href;
+      return;
+    }
+    const boton = caja && /^[0-9]$/.test(ev.key) && caja.querySelector(`[data-tecla="${ev.key}"]`);
+    if (boton) {
+      ev.preventDefault();
+      boton.disabled = true;
+      boton.form.requestSubmit ? boton.form.requestSubmit() : boton.form.submit();
+    }
+  });
+})();
