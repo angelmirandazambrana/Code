@@ -525,7 +525,14 @@ def emparejar(cliente: Cliente, doc: dict) -> dict:
         consultas = variantes(doc["titulo"], doc.get("sistema"), doc.get("codigo") or doc.get("ext_codigo"))
     candidatos: dict[int, dict] = {}
     for q in consultas:
-        for c in cliente.buscar(q, tipo)[:40]:
+        # BGG los da por orden alfabético: con títulos comunes el bueno puede estar más allá del 40.
+        # Solo con el título entero: con las consultas cortas de recurso («2nd Edition») se colarían
+        # cientos de «X (2nd Edition)».
+        encontrados = cliente.buscar(q, tipo)
+        if len(encontrados) > 40 and q == consultas[0]:
+            encontrados = sorted(encontrados, key=lambda c: -max(
+                _parecido(q, n) for n in {c["nombre"], _sin_parentesis(c["nombre"])}))
+        for c in encontrados[:40]:
             candidatos.setdefault(c["id"], c)
         if candidatos and any(_parecido(q, c["nombre"]) >= 0.9 for c in candidatos.values()):
             break
@@ -533,9 +540,19 @@ def emparejar(cliente: Cliente, doc: dict) -> dict:
         return {"estado": "sin_resultado", "confianza": 0.0, "ref": None,
                 "datos": {"consultas": consultas, "tipo": tipo}}
 
-    # Preselección por nombre y ficha completa de los 5 mejores (una sola petición).
-    pre = sorted(candidatos.values(),
-                 key=lambda c: -max(_parecido(q, c["nombre"]) for q in consultas))[:5]
+    # Preselección por nombre y ficha completa de los 5 mejores (una sola petición). La etiqueta de
+    # versión que añade RPGGeek («Dungeon Master's Guide (D&D 5e)») no cuenta, y entre nombres igual de
+    # parecidos van primero los del año más cercano al del documento.
+    anio = doc.get("publicado") or doc.get("anio") or None
+
+    def orden(c: dict) -> tuple[float, float, int]:
+        entero = max(_parecido(q, c["nombre"]) for q in consultas)
+        nombre = max(entero, *(_parecido(q, _sin_parentesis(c["nombre"])) for q in consultas))
+        lejos = abs(c["anio"] - anio) if anio and c.get("anio") else 0
+        # con la etiqueta incluida («Mutant Chronicles (2nd Edition)») desempata antes que el año
+        return -round(nombre, 2), -round(entero, 2), lejos
+
+    pre = sorted(candidatos.values(), key=orden)[:5]
     fichas = cliente.fichas([c["id"] for c in pre], tipo)
     puntuados = sorted(
         ({**fichas.get(c["id"], {**c, "tipo": tipo, "editoriales": [], "autores": [], "sistema": [],
@@ -578,6 +595,11 @@ def emparejar(cliente: Cliente, doc: dict) -> dict:
         una_palabra = max(len(re.sub(r"^(the|a|an) ", "", normalizar(n)).split()) for n in nombres_mejor if n) <= 1
         dudoso = dudoso or (una_palabra and not coincide_editorial(doc, mejor) and not version_que_coincide(doc, mejor)[0]
                             and coincide_vecinos(doc.get("vecinos"), mejor) < 2)
+        # El PDF es de un sistema y la ficha de otro («robots» de Exodus / «Robots» de Steampower), y ni la
+        # editorial ni lo ya emparejado en la carpeta dicen otra cosa: un nombre corriente, no este libro.
+        dudoso = dudoso or (bool(doc.get("sistema")) and bool(_lineas(mejor))
+                            and not coincide_sistema(doc["sistema"], mejor)
+                            and not coincide_editorial(doc, mejor) and not coincide_vecinos(doc.get("vecinos"), mejor))
         dudoso = dudoso or (parecido_nombre(consultas, mejor) < 0.9 and not version_que_coincide(doc, mejor)[0]
                             and not any(es_parte_del_nombre(q, n) for q in consultas for n in nombres_mejor))
     if mejor["puntos"] >= UMBRAL_AUTO and not (empate or solo_sistema or otra_editorial or dudoso):

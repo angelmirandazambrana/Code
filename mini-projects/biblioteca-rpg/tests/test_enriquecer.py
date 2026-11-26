@@ -80,6 +80,23 @@ def test_emparejar_auto_pendiente_y_nada():
     assert geek.emparejar(ClienteFalso({}, {}), doc)["estado"] == "sin_resultado"
 
 
+def test_preseleccion_con_titulos_comunes():
+    # RPGGeek llama «Dungeon Master's Guide (D&D 5e)» a la de 2014 y deja sin etiqueta las de 1979 y 1989:
+    # la etiqueta no cuenta y desempata el año. Y la búsqueda viene por orden alfabético: el bueno puede
+    # estar más allá del resultado 40.
+    doc = {"titulo": "Dungeon Master's Guide", "categoria": "Rol", "sistema": "D&D",
+           "editorial": "Wizards of the Coast", "publicado": 2014}
+    relleno = [{"id": 100 + i, "nombre": f"Adventurers League Dungeon Master's Guide {i}", "anio": 2016}
+               for i in range(45)]
+    nombres = {1: ("Dungeon Master's Guide", 1979), 2: ("Dungeon Master's Guide", 1989),
+               3: ("Dungeon Master's Guide (D&D 3e)", 2000), 4: ("Dungeon Master's Guide (D&D 3.5e)", 2003),
+               5: ("Dungeon Master's Guide (D&D 4e)", 2008), 6: ("Dungeon Master's Guide (D&D 5e)", 2014)}
+    buscados = relleno + [{"id": i, "nombre": n, "anio": a} for i, (n, a) in nombres.items()]
+    fichas = {i: _ficha(i, n, a, "Wizards of the Coast" if a > 1995 else "TSR") for i, (n, a) in nombres.items()}
+    r = geek.emparejar(ClienteFalso({doc["titulo"]: buscados}, fichas), doc)
+    assert r["ref"] == "6" and r["estado"] == "auto"
+
+
 def test_leer_ficha_xml():
     import xml.etree.ElementTree as ET
     xml = """<items><item type="rpgitem" id="42"><name type="primary" value="Tomb of Horrors"/>
