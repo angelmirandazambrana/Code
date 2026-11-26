@@ -22,6 +22,9 @@ PAUSA = float(os.environ.get("BGG_PAUSA", "2.5"))  # segundos entre peticiones
 CADUCIDAD_CACHE = 180 * 86400
 
 UMBRAL_AUTO = 0.92
+# Si lo único que falta es puntuación (sin empate, sistema, editorial ni nombre dudosos), basta con
+# menos: en las revisiones a mano, de 0,85 a 0,92 la primera opción era la buena 43 de 44 veces.
+UMBRAL_AUTO_LIMPIO = 0.85
 UMBRAL_REVISAR = 0.70
 # Si dos candidatos se llaman igual, el primero tiene que sacar esta ventaja para elegirlo solo.
 MARGEN_MISMO_NOMBRE = 0.055
@@ -323,7 +326,9 @@ def version_que_coincide(doc: dict, ficha: dict) -> tuple[dict | None, str | Non
 
 # Nombres cortos de sistemas tal como van en las carpetas -> como los nombra RPGGeek.
 ALIAS_SISTEMA = {"d&d": "dungeons dragons", "ad&d": "advanced dungeons dragons", "coc": "call of cthulhu",
-                 "wfrp": "warhammer fantasy roleplay", "swd6": "star wars", "l5r": "legend of the five rings"}
+                 "wfrp": "warhammer fantasy roleplay", "swd6": "star wars", "l5r": "legend of the five rings",
+                 # en RPGGeek: «Pathfinder 1E Compatible Product», «Alternity», «DramaSystem»
+                 "pathfinder 3rd party": "pathfinder", "star drive": "alternity", "hillfolk": "dramasystem"}
 
 
 def coincide_sistema(sistema: str, ficha: dict) -> bool | None:
@@ -574,7 +579,9 @@ def emparejar(cliente: Cliente, doc: dict) -> dict:
                   or (min(otro["puntos"], 1.0) >= min(mejor["puntos"], 1.0) - 0.02 and ventaja < 0.1))
     # Solo se ha podido buscar el sistema («All Flesh Must Be Eaten» para «… Errata»): será otra cosa
     # de esa línea, no el básico; que lo mire una persona.
-    solo_sistema = bool(consultas) and normalizar(consultas[0]) == normalizar(doc.get("sistema") or "")         and len(normalizar(RE_COLETILLA.sub("", limpiar_titulo(doc.get("titulo") or ""))).split())         > len(normalizar(consultas[0]).split())
+    solo_sistema = (bool(consultas) and normalizar(consultas[0]) == normalizar(doc.get("sistema") or "")
+                    and len(normalizar(RE_COLETILLA.sub("", limpiar_titulo(doc.get("titulo") or ""))).split())
+                    > len(normalizar(consultas[0]).split()))
     # Sabemos la editorial y no es la de la ficha: que lo mire una persona.
     # Salvo que lo confirmen el sistema o lo ya emparejado en la carpeta: la carpeta puede decir la
     # dueña del juego (R. Talsorian) y el módulo ser de otra (Atlas Games).
@@ -585,24 +592,36 @@ def emparejar(cliente: Cliente, doc: dict) -> dict:
     # y con el nombre a medias («Behind Lines» / «Behind Enemy Lines») no basta lo de alrededor
     # (editorial, año, carpeta): solo el ISBN o el código de producto. En wargames y juegos de mesa sí
     # vale: la ficha de BGG es la del juego y la errata o el suplemento van con él.
-    dudoso = False
+    dudas: list[str] = []
     if tipo != "boardgame":
         nombres_mejor = [mejor.get("nombre") or "", *(mejor.get("alternativos") or [])]
-        dudoso = bool(RE_ACCESORIO.search(doc.get("titulo") or "")
-                      and not any(RE_ACCESORIO.search(n) for n in nombres_mejor))
+        if RE_ACCESORIO.search(doc.get("titulo") or "") and not any(RE_ACCESORIO.search(n) for n in nombres_mejor):
+            dudas.append("accesorio")
         # Un nombre de una palabra («Bard», «Polaris», «Nemesis») lo llevan muchas cosas: el sistema no
         # basta, hace falta la editorial, el ISBN o el código.
         una_palabra = max(len(re.sub(r"^(the|a|an) ", "", normalizar(n)).split()) for n in nombres_mejor if n) <= 1
-        dudoso = dudoso or (una_palabra and not coincide_editorial(doc, mejor) and not version_que_coincide(doc, mejor)[0]
-                            and coincide_vecinos(doc.get("vecinos"), mejor) < 2)
+        if (una_palabra and not coincide_editorial(doc, mejor) and not version_que_coincide(doc, mejor)[0]
+                and coincide_vecinos(doc.get("vecinos"), mejor) < 2):
+            dudas.append("una_palabra")
         # El PDF es de un sistema y la ficha de otro («robots» de Exodus / «Robots» de Steampower), y ni la
         # editorial ni lo ya emparejado en la carpeta dicen otra cosa: un nombre corriente, no este libro.
-        dudoso = dudoso or (bool(doc.get("sistema")) and bool(_lineas(mejor))
-                            and not coincide_sistema(doc["sistema"], mejor)
-                            and not coincide_editorial(doc, mejor) and not coincide_vecinos(doc.get("vecinos"), mejor))
-        dudoso = dudoso or (parecido_nombre(consultas, mejor) < 0.9 and not version_que_coincide(doc, mejor)[0]
-                            and not any(es_parte_del_nombre(q, n) for q in consultas for n in nombres_mejor))
-    if mejor["puntos"] >= UMBRAL_AUTO and not (empate or solo_sistema or otra_editorial or dudoso):
+        if (doc.get("sistema") and _lineas(mejor) and not coincide_sistema(doc["sistema"], mejor)
+                and not coincide_editorial(doc, mejor) and not coincide_vecinos(doc.get("vecinos"), mejor)):
+            dudas.append("otro_sistema")
+        if (parecido_nombre(consultas, mejor) < 0.9 and not version_que_coincide(doc, mejor)[0]
+                and not any(es_parte_del_nombre(q, n) for q in consultas for n in nombres_mejor)):
+            dudas.append("nombre_a_medias")
+    # Por qué no se elige solo (se guarda para poder afinar las reglas con lo que decides a mano).
+    otros = empate or solo_sistema or otra_editorial or dudas
+    # y algo de fuera del nombre lo confirma (editorial, sistema, la carpeta, la edición o el año)
+    anio_doc = doc.get("publicado") or doc.get("anio")
+    confirmado = (coincide_editorial(doc, mejor) or (doc.get("sistema") and coincide_sistema(doc["sistema"], mejor))
+                  or coincide_vecinos(doc.get("vecinos"), mejor) or version_que_coincide(doc, mejor)[0]
+                  or (anio_doc and mejor.get("anio") and abs(anio_doc - mejor["anio"]) <= 1))
+    umbral = UMBRAL_AUTO if otros or tipo == "boardgame" or not confirmado else UMBRAL_AUTO_LIMPIO
+    motivos = [m for m, si in (("puntos", mejor["puntos"] < umbral), ("empate", empate),
+                               ("solo_sistema", solo_sistema), ("otra_editorial", otra_editorial)) if si] + dudas
+    if not motivos:
         estado = "auto"
     elif tipo == "boardgame":
         # Wargames y juegos de mesa: sin revisión a mano; o el juego coincide o no se apunta nada.
@@ -620,6 +639,7 @@ def emparejar(cliente: Cliente, doc: dict) -> dict:
     return {
         "estado": estado, "confianza": mejor["puntos"], "ref": str(mejor["id"]),
         "datos": {"tipo": tipo, "consultas": consultas, "elegido": mejor,
+                  **({"motivos": motivos} if estado != "auto" else {}),
                   "candidatos": [{k: f.get(k) for k in ("id", "nombre", "anio", "editoriales", "url", "puntos")}
                                  for f in puntuados]},
     }

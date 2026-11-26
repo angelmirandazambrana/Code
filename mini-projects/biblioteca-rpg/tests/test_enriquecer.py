@@ -80,6 +80,26 @@ def test_emparejar_auto_pendiente_y_nada():
     assert geek.emparejar(ClienteFalso({}, {}), doc)["estado"] == "sin_resultado"
 
 
+def test_motivos_y_umbral_sin_dudas():
+    # «Pathfinder 3rd Party» del catálogo es «Pathfinder 1E Compatible Product» en RPGGeek.
+    assert geek.coincide_sistema("Pathfinder 3rd Party", {"sistema": ["Pathfinder 1E Compatible Product"]})
+    # Sin otra duda y con algo que lo confirme (aquí la editorial) basta con 0,85; si no, a revisar y
+    # se apunta por qué.
+    doc = {"titulo": "Rats in the Street", "categoria": "Rol", "editorial": "Frog God Games"}
+    for puntos, editorial, estado in ((0.88, "Frog God Games", "auto"), (0.80, "Frog God Games", "pendiente"),
+                                      (0.88, None, "pendiente")):
+        orig = geek.puntuar
+        geek.puntuar = lambda *a, p=puntos: p
+        try:
+            r = geek.emparejar(ClienteFalso({doc["titulo"]: [{"id": 1, "nombre": doc["titulo"], "anio": 2010}]},
+                                            {1: _ficha(1, doc["titulo"], 2010, "Frog God Games")}),
+                               {**doc, "editorial": editorial})
+        finally:
+            geek.puntuar = orig
+        assert r["estado"] == estado, (puntos, editorial)
+        assert r["datos"].get("motivos") == (None if estado == "auto" else ["puntos"])
+
+
 def test_preseleccion_con_titulos_comunes():
     # RPGGeek llama «Dungeon Master's Guide (D&D 5e)» a la de 2014 y deja sin etiqueta las de 1979 y 1989:
     # la etiqueta no cuenta y desempata el año. Y la búsqueda viene por orden alfabético: el bueno puede
