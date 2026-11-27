@@ -41,6 +41,19 @@ def test_parecidas(tmp_path):
     assert novedades.parecidas(con, "") == []
 
 
+def test_reddit(monkeypatch, tmp_path):
+    datos = {"data": {"children": [
+        {"data": {"title": "Fiasco &amp; friends", "permalink": "/r/rpg/comments/x/", "created_utc": 1763683200,
+                  "selftext": "Bully Pulpit Games"}},
+        {"data": {"title": "Weekly thread", "permalink": "/r/rpg/comments/y/", "stickied": True}}]}}
+    assert novedades.parsear_reddit(datos) == [{"url": "https://www.reddit.com/r/rpg/comments/x/",
+                                                "titulo": "Fiasco & friends", "resumen": "Bully Pulpit Games",
+                                                "fecha": "2025-11-21"}]
+    for k in ("REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET", "REDDIT_USUARIO"):
+        monkeypatch.delenv(k, raising=False)
+    assert novedades.leer_reddit(conectar(tmp_path / "c.sqlite")) == 0  # sin claves, ni lo intenta
+
+
 def test_como_pista():
     assert novedades.como_pista([]) == []
     lineas = novedades.como_pista([{"fuente": "X", "titulo": "T", "resumen": "", "fecha": None}])

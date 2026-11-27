@@ -6,12 +6,16 @@
 Lo que baja de Telegram suele ser de lo que hablan estas webs («sale Dark Sun para D&D 5e, de Wizards»).
 Las noticias cuyo título se parece al del fichero se le pasan a Haiku junto al resto de pistas: dicen el
 juego, la editorial y cuándo salió. Solo se leen los RSS, que existen para leerse así, y despacio.
+También los posts nuevos de unos subreddits, si están las claves de Reddit en el .env (ver leer_reddit).
 """
 
 import argparse
+import base64
 import email.utils
 import html
+import json
 import math
+import os
 import re
 import sys
 import time
@@ -109,15 +113,72 @@ def leer(con, paginas: int = 1) -> int:
             except (urllib.error.URLError, TimeoutError, ET.ParseError, OSError) as ex:
                 print(f"Novedades: {nombre} p{n}: {type(ex).__name__}: {ex}", file=sys.stderr, flush=True)
                 break
-            antes = con.total_changes
-            con.executemany(
-                "INSERT OR IGNORE INTO novedades (url, fuente, titulo, resumen, fecha, leido_en) VALUES (?,?,?,?,?,?)",
-                [(i["url"], nombre, i["titulo"], i["resumen"], i["fecha"], int(time.time())) for i in items])
-            con.commit()
-            nuevas += con.total_changes - antes
+            nuevas += _guardar(con, nombre, items)
             if not items:
                 break
             time.sleep(PAUSA)
+    return nuevas + leer_reddit(con)
+
+
+def _guardar(con, fuente: str, items: list[dict]) -> int:
+    antes = con.total_changes
+    con.executemany(
+        "INSERT OR IGNORE INTO novedades (url, fuente, titulo, resumen, fecha, leido_en) VALUES (?,?,?,?,?,?)",
+        [(i["url"], fuente, i["titulo"], i["resumen"], i["fecha"], int(time.time())) for i in items])
+    con.commit()
+    return con.total_changes - antes
+
+
+# Reddit: con la aplicación de solo lectura del usuario (REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET y
+# REDDIT_USUARIO en el .env). Sin ellas no se lee: sin registrarse, Reddit lo corta.
+SUBREDDITS = ["rpg", "osr", "wargaming", "Traveller", "callofcthulhu", "Pathfinder2e", "solorpgs",
+              "Warhammer", "boardwargames"]
+
+
+def _reddit_claves() -> tuple[str, str, str] | None:
+    claves = tuple(os.environ.get(k, "").strip() for k in
+                   ("REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET", "REDDIT_USUARIO"))
+    return claves if all(claves) else None
+
+
+def parsear_reddit(datos: dict) -> list[dict]:
+    res = []
+    for hijo in (datos.get("data") or {}).get("children") or []:
+        d = hijo.get("data") or {}
+        if not d.get("title") or not d.get("permalink") or d.get("stickied"):
+            continue
+        fecha = time.strftime("%Y-%m-%d", time.gmtime(d["created_utc"])) if d.get("created_utc") else None
+        res.append({"url": "https://www.reddit.com" + d["permalink"], "titulo": _texto(d["title"]),
+                    "resumen": _texto(d.get("selftext"))[:400], "fecha": fecha})
+    return res
+
+
+def leer_reddit(con) -> int:
+    claves = _reddit_claves()
+    if not claves:
+        return 0
+    cliente, secreto, usuario = claves
+    agente = f"linux:biblioteca-rpg:1.0 (by /u/{usuario})"
+    try:
+        req = urllib.request.Request(
+            "https://www.reddit.com/api/v1/access_token", data=b"grant_type=client_credentials",
+            headers={"User-Agent": agente,
+                     "Authorization": "Basic " + base64.b64encode(f"{cliente}:{secreto}".encode()).decode()})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            token = json.load(r)["access_token"]
+    except (urllib.error.URLError, TimeoutError, OSError, KeyError, ValueError) as ex:
+        print(f"Novedades: Reddit no da acceso: {type(ex).__name__}", file=sys.stderr, flush=True)
+        return 0
+    nuevas = 0
+    for sub in SUBREDDITS:
+        try:
+            req = urllib.request.Request(f"https://oauth.reddit.com/r/{sub}/new?limit=100&raw_json=1",
+                                         headers={"User-Agent": agente, "Authorization": f"Bearer {token}"})
+            with urllib.request.urlopen(req, timeout=30) as r:
+                nuevas += _guardar(con, f"r/{sub}", parsear_reddit(json.load(r)))
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as ex:
+            print(f"Novedades: r/{sub}: {type(ex).__name__}: {ex}", file=sys.stderr, flush=True)
+        time.sleep(PAUSA)
     return nuevas
 
 

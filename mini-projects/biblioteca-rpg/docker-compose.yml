@@ -66,6 +66,10 @@ services:
       ENTRADA_LOTES: "${ENTRADA_LOTES:-on}"
       ENTRADA_LOTES_HORA: "${ENTRADA_LOTES_HORA:-3}"
       ENTRADA_LOTES_BUSQUEDAS_DIA: "${ENTRADA_LOTES_BUSQUEDAS_DIA:-20}"
+      # Posts nuevos de subreddits de rol como pistas (aplicación de solo lectura; sin claves, no se lee).
+      REDDIT_CLIENT_ID: "${REDDIT_CLIENT_ID:-}"
+      REDDIT_CLIENT_SECRET: "${REDDIT_CLIENT_SECRET:-}"
+      REDDIT_USUARIO: "${REDDIT_USUARIO:-}"
       TZ: "${TZ:-Europe/Madrid}"
     volumes:
       - "${BIBLIOTECA_HOST}:/biblioteca"      # lectura y ESCRITURA
