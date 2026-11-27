@@ -1,0 +1,18 @@
+{# Datos de un fichero de la Entrada, cada uno con de dónde sale (como en la ficha del libro). #}
+{% macro editoriales(e) -%}
+  {%- set claude = ((e.llm or {}).respuesta or {}).editorial or '' -%}
+  {%- if e.editorial %}{{ e.editorial }}<span class="segun">según el PDF</span>{% endif -%}
+  {%- if claude and claude|lower != (e.editorial or '')|lower and claude != '-' -%}
+    {% if e.editorial %} · {% endif %}{{ claude }}<span class="segun">según Claude</span>
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro datos_entrada(e, confianza=false) -%}
+  {%- set partes = [e.tamano|tamano, (e.n_pdfs ~ ' PDF') if e.es_carpeta and e.n_pdfs else None,
+                   (e.paginas ~ ' pág.') if e.paginas else None]|select|list -%}
+  {{ partes|join(' · ') }}
+  {%- set ed = editoriales(e)|trim -%}
+  {%- if ed %} · Editorial: {{ ed }}{% endif -%}
+  {%- if e.publicado %} · Año: {{ e.publicado }}<span class="segun">según el PDF</span>{% endif -%}
+  {%- if confianza %} · confianza {{ ((e.confianza or 0) * 100)|round|int }}%{% endif -%}
+{%- endmacro %}

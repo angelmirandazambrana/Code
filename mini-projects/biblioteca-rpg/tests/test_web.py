@@ -265,3 +265,29 @@ def test_titulo_del_libro(cliente):
     assert f'href="/libro/{doc_id}"' in cliente.get("/", params={"q": "dragón cien"}).text
     cliente.post(f"/libro/{doc_id}/datos", data={"ext_titulo": "", "antes_ext_titulo": "El dragón cien"})
     assert con.execute("SELECT ext_titulo FROM docs WHERE id=?", (doc_id,)).fetchone()[0] == "Dragon Magazine #100"
+
+
+def test_busca_tambien_en_la_entrada(cliente):
+    import json
+
+    from biblioteca_rpg import config, db
+    con = db.conectar(config.cargar().db)
+    llm = {"origen": "lote", "juego": "D&D", "tipo": "Supplements", "seguridad": "media",
+           "respuesta": {"editorial": "Second World Simulations"}}
+    with con:
+        con.execute("INSERT INTO entrada (id, nombre, ruta_actual, es_carpeta, estado, editorial, publicado, paginas, "
+                    "tamano, confianza, alternativas, propuesta, llm) VALUES (88, '2WS1100e Masters of Arms 3.5 [OEF].pdf', "
+                    "'_Inbox/2WS1100e Masters of Arms 3.5 [OEF].pdf', 0, 'pendiente', 'AEG', 2004, 98, 6190491, 0.22, ?, "
+                    "'RPG/D&D', ?)", (json.dumps([["RPG/D&D", 22]]), json.dumps(llm)))
+        con.execute("INSERT INTO entrada (id, nombre, ruta_actual, es_carpeta, estado, confianza, alternativas, propuesta) "
+                    "VALUES (89, '2WS1101 Bodies and Souls.pdf', '_Inbox/2WS1101 Bodies and Souls.pdf', 0, 'pendiente', 0.4, "
+                    "?, 'RPG/D&D')", (json.dumps([["RPG/D&D", 40]]),))
+    r = cliente.get("/", params={"q": "masters of arms"}).text
+    assert "En la Entrada, sin clasificar todavía" in r and 'href="/entrada/revisar?id=88"' in r
+    assert "AEG<span class=\"segun\">según el PDF</span>" in r and "Second World Simulations<span class=\"segun\">según Claude</span>" in r
+    assert "En la Entrada" in cliente.get("/", params={"q": "second world"}).text  # también por lo que leyó Claude
+    assert "En la Entrada" not in cliente.get("/", params={"q": "dragon"}).text
+    for pagina in ("/entrada", "/entrada/revisar?id=88"):  # los grupos se ven en el servidor
+        t = cliente.get(pagina).text
+        assert "según Claude" in t, pagina
+    assert "Renombrar el fichero (opcional)" in cliente.get("/entrada").text

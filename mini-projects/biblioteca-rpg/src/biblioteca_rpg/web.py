@@ -166,7 +166,29 @@ def inicio(request: Request, q: str = "", carpeta: str = "", orden: str = "", pa
                                  lambda: subcarpetas(con, filtros, q or None, carpeta or None)),
         "migas": migas, "url": lambda **c: _url(base, **c),
         "total_catalogo": con.execute("SELECT COUNT(*) FROM docs").fetchone()[0],
+        # Lo que aún está en la Entrada no está en el catálogo, pero también se busca (sin filtros).
+        "en_entrada": buscar_en_entrada(con, q) if q and not filtros and not carpeta else [],
     })
+
+
+def buscar_en_entrada(con, q: str, limite: int = 24) -> list[dict]:
+    """Pendientes de la Entrada con todas las palabras de `q` en el nombre, el título interno o lo
+    que leyó Claude (juego, editorial). Son pocos cientos: se filtran aquí."""
+    palabras = normalizar(q).split()
+    if not palabras:
+        return []
+    res = []
+    for f in con.execute("SELECT * FROM entrada WHERE estado IN ('pendiente', 'error') ORDER BY llegado_en DESC, id DESC"):
+        e = _entrada_dict(f)
+        claude = e["llm"] or {}
+        resp = claude.get("respuesta") or {}
+        texto = normalizar(" ".join(str(x) for x in (e["nombre"], e["pdf_titulo"], e["editorial"], claude.get("juego"),
+                                                    resp.get("editorial")) if x))
+        if all(p in texto for p in palabras):
+            res.append(e)
+            if len(res) == limite:
+                break
+    return res
 
 
 @app.get("/libro/{doc_id}", response_class=HTMLResponse)

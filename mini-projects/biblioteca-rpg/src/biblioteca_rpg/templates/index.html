@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_entrada.html" import datos_entrada %}
 {% block titulo %}{% if q %}{{ q }} · {% endif %}Biblioteca{% endblock %}
 {% block contenido %}
 <div class="disposicion">
@@ -79,6 +80,19 @@
       </div>
     {% endif %}
 
+    {% if en_entrada %}
+      <section class="en-entrada">
+        <h2>En la Entrada, sin clasificar todavía <span class="n">{{ en_entrada|length }}</span></h2>
+        <p class="tenue">Están en <code>_Inbox</code>: aparecerán en la biblioteca cuando les des carpeta.</p>
+        <ul class="lista-simple">
+          {% for e in en_entrada %}
+            <li><a href="/entrada/revisar?id={{ e.id }}">{% if e.es_carpeta %}📁 {% endif %}{{ e.nombre }}</a>
+              <span class="tenue">· {{ datos_entrada(e) }}</span></li>
+          {% endfor %}
+        </ul>
+      </section>
+    {% endif %}
+
     {% if res.filas %}
       <ul class="rejilla">
         {% for d in res.filas %}
@@ -94,7 +108,7 @@
         {% endfor %}
       </ul>
     {% else %}
-      <p class="vacio">No hay nada con estos filtros.</p>
+      <p class="vacio">{% if en_entrada %}En la biblioteca todavía no hay nada así.{% else %}No hay nada con estos filtros.{% endif %}</p>
     {% endif %}
 
     {% if res.paginas > 1 %}

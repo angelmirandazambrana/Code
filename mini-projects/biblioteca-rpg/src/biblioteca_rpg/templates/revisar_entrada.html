@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_entrada.html" import editoriales %}
 {% block titulo %}Revisar con el PDF · Entrada{% endblock %}
 {% block contenido %}
 <section class="revisar-pdf" data-entrada="{{ e.id }}">
@@ -19,9 +20,10 @@
     <dl class="datos">
       {% set d = [e.tamano|tamano, (e.n_pdfs ~ ' PDF') if e.es_carpeta and e.n_pdfs else None, (e.paginas ~ ' pág.') if e.paginas else None]|select|join(' · ') %}
       {% if d %}<dt>Fichero</dt><dd>{{ d }}</dd>{% endif %}
-      {% if e.pdf_titulo and e.pdf_titulo != e.nombre %}<dt>Título interno</dt><dd>{{ e.pdf_titulo }}</dd>{% endif %}
-      {% if e.editorial %}<dt>Editorial</dt><dd>{{ e.editorial }}</dd>{% endif %}
-      {% if e.publicado %}<dt>Año</dt><dd>{{ e.publicado }}</dd>{% endif %}
+      {% if e.pdf_titulo and e.pdf_titulo != e.nombre %}<dt>Título interno del PDF</dt><dd>{{ e.pdf_titulo }}</dd>{% endif %}
+      {% set ed = editoriales(e)|trim %}
+      {% if ed %}<dt>Editorial</dt><dd>{{ ed }}</dd>{% endif %}
+      {% if e.publicado %}<dt>Año</dt><dd>{{ e.publicado }}<span class="segun">según el PDF</span></dd>{% endif %}
       {% if canal %}<dt>Telegram</dt><dd>{{ canal }}</dd>{% endif %}
       {% if e.llm %}<dt>Claude</dt><dd>{{ e.llm.juego }} · {{ e.llm.tipo }} <span class="tenue">({{ e.llm.seguridad }})</span>{% if e.llm.motivo %}<br><span class="tenue">{{ e.llm.motivo }}</span>{% endif %}</dd>{% endif %}
     </dl>
@@ -58,7 +60,7 @@
           </span>
         </label>
       </fieldset>
-      <label class="renombrar">Nombre al moverlo <input type="text" name="nombre" placeholder="{{ e.nombre }}"></label>
+      <label class="renombrar">Renombrar el fichero (opcional) <input type="text" name="nombre" placeholder="{{ e.nombre }}"></label>
       <div class="acciones">
         <button class="boton principal" type="submit" name="accion" value="mover">Mover y siguiente</button>
         <button class="boton" type="submit" name="accion" value="descartar" formnovalidate>Descartar</button>

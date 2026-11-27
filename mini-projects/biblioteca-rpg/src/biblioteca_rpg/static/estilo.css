@@ -448,3 +448,8 @@ kbd {
 .aviso-revisado a { text-decoration: underline; }
 @media (hover: none) { .ayuda-teclas, .candidatos kbd { display: none; } }
 #bgg { scroll-margin-top: 90px; }
+
+/* Búsqueda: lo que aún está en la Entrada */
+.en-entrada { margin: 0 0 1.5rem; padding: .75rem 1rem; border: 1px solid var(--borde); border-radius: 8px; background: var(--superficie); }
+.en-entrada h2 { font-size: 16px; margin: 0 0 .25rem; }
+.en-entrada p { margin: 0 0 .5rem; }
