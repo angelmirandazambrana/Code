@@ -174,6 +174,7 @@ COLUMNAS_EXTRA = {
     "ext_codigo": "TEXT",        # código sacado del texto del PDF, si el nombre no lo tiene
     "ext_codigo_orden": "TEXT",
     "ext_titulo": "TEXT",        # título del libro (RPGGeek, wikis o a mano) si no es el del fichero
+    "serie": "TEXT",             # serie o colección (RPGGeek o a mano)
 }
 
 # Editorial unificada: forma -> nombre (lo rellena editoriales.recalcular) y disparadores que
@@ -197,6 +198,7 @@ END;
 COLUMNAS_ENTRADA = {
     "origen_texto": "TEXT",      # mensaje de Telegram que acompañaba al fichero
     "llm": "TEXT",               # lo que dijo Claude (JSON: carpeta, seguridad, juego, tipo, motivo)
+    "a_mano": "TEXT",            # JSON {campo: valor} escrito al decidir; pasa al catálogo al moverlo
 }
 
 # Búsqueda de texto. Va aparte del esquema porque usa columnas que añade _migrar (ext_titulo).
@@ -271,6 +273,7 @@ def _migrar(con: sqlite3.Connection) -> None:
                         raise
     _crear_fts(con)
     con.execute("CREATE INDEX IF NOT EXISTS ix_ext_editorial ON docs(ext_editorial)")
+    con.execute("CREATE INDEX IF NOT EXISTS ix_serie ON docs(serie)")
     con.executescript(ESQUEMA_EDITORIALES)
     if "editorial_unif" in nuevas:  # hasta que se recalculen los alias, la editorial tal cual
         con.execute("UPDATE docs SET editorial_unif = COALESCE(editorial, ext_editorial)")

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_datos.html" import resumen_libro %}
 {% from "_geek.html" import candidatos %}
 {% block titulo %}Revisar · Biblioteca{% endblock %}
 {% block contenido %}
@@ -13,8 +14,8 @@
       <a class="revisar-portada" href="/libro/{{ it.id }}"><img src="/portada/{{ it.id }}.jpg" alt="" loading="lazy"></a>
       <div>
         <h2><a href="/libro/{{ it.id }}">{{ it.titulo }}</a></h2>
-        <p class="tenue ruta">{{ it.carpeta }}</p>
-        <p class="tenue">{{ [it.sistema, it.editorial_unif or it.editorial or it.ext_editorial, it.publicado or it.anio]|select|join(' · ') }}</p>
+        <p class="tenue ruta">Fichero: {{ it.carpeta }}/{{ it.nombre }}</p>
+        <p class="tenue">{{ resumen_libro(it) }}</p>
         {{ candidatos(it.id, it.datos, volver) }}
       </div>
     </article>

@@ -314,3 +314,14 @@ def test_titulo_del_libro_segun_la_ficha():
     assert v["ext_titulo"] == "Hellgate Keep" and '"titulo": "geek"' in v["origen"]
     assert _efectivos(geek, "x.pdf", titulo="Hellgate Keep", idioma="Español")["ext_titulo"] is None  # traducción
     assert _efectivos({"ref": {"titulo": "Hangman's Noose"}}, "x.pdf", titulo="U2")["ext_titulo"] == "Hangman's Noose"
+
+
+def test_serie_segun_la_ficha():
+    from biblioteca_rpg.enriquecer import _efectivos
+    from biblioteca_rpg.geek import serie_de_ficha
+    g = {"tipo": "rpgitem", "nombre": "Fantastic Footwear", "serie": ["Genius Guides", "Loot 4 Less"]}
+    assert serie_de_ficha(g, "Loot 4 Less 4 - Fantastic Footwear") == "Loot 4 Less"  # la que nombra el fichero
+    assert serie_de_ficha(g, "Fantastic Footwear") == "Genius Guides"
+    assert serie_de_ficha({"tipo": "boardgame", "serie": ["Squad Leader"]}, "x") is None
+    v = _efectivos({"geek": {"elegido": g}}, "x.pdf", titulo="Fantastic Footwear", idioma="Español")
+    assert v["serie"] == "Genius Guides" and '"serie": "geek"' in v["origen"]  # la serie vale en cualquier idioma

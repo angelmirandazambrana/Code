@@ -12,6 +12,7 @@ FACETAS = {
     "sistema": "Sistema / línea",
     "edicion": "Edición",
     "editorial": "Editorial",
+    "serie": "Serie / colección",
     "tipo": "Tipo",
     "ambientacion": "Ambientación",
     "idioma": "Idioma",

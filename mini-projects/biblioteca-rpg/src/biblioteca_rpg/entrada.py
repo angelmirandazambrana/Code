@@ -662,8 +662,8 @@ def mover(con, cfg, fila, log: Registro) -> tuple[str, str]:
     nombre = (fila["nuevo_nombre"] or "").strip() or origen.name
     if "/" in nombre or "\\" in nombre or nombre.startswith("."):
         raise ValueError(f"nombre no válido: {nombre!r}")
-    if origen.is_file() and not Path(nombre).suffix:
-        nombre += origen.suffix
+    if origen.is_file() and Path(nombre).suffix.lower() != origen.suffix.lower():
+        nombre += origen.suffix  # «Masters of Arms 3.5» -> «Masters of Arms 3.5.pdf»
     carpeta = cfg.raiz / destino_rel
     objetivo = carpeta / nombre
     ultimo = destino_rel.rsplit("/", 1)[-1]
@@ -691,6 +691,7 @@ def mover(con, cfg, fila, log: Registro) -> tuple[str, str]:
 def ejecutar_aprobados(con, cfg, log: Registro) -> int:
     filas = con.execute("SELECT * FROM entrada WHERE estado='aprobado' ORDER BY id").fetchall()
     carpetas_tocadas: set[str] = set()
+    con_datos: list[tuple[str, dict]] = []  # (ruta nueva, datos escritos al decidir)
     for f in filas:
         anterior = f["ruta_actual"]
         try:
@@ -706,13 +707,26 @@ def ejecutar_aprobados(con, cfg, log: Registro) -> int:
                         ("descartado" if nueva.startswith("_Duplicados/") else "movido", nueva, nota or None,
                          int(time.time()), f["id"]))
         print(f"  movido: {anterior} -> {nueva}", flush=True)
+        if f["a_mano"] and not nueva.startswith("_Duplicados/"):
+            con_datos.append((nueva, json.loads(f["a_mano"])))
         for rel in (anterior, nueva):
             if config_mod.en_areas(cfg.areas, rel):
                 # El catálogo se pone al día solo en lo tocado: la carpeta (o la que contiene el fichero).
                 carpetas_tocadas.add(rel if (cfg.raiz / rel).is_dir() or not Path(rel).suffix else rel.rsplit("/", 1)[0])
     if carpetas_tocadas:
         actualizar_catalogo(con, cfg, sorted(carpetas_tocadas))
+    pasar_datos_al_catalogo(con, con_datos)
     return len(filas)
+
+
+def pasar_datos_al_catalogo(con, con_datos: list[tuple[str, dict]]) -> None:
+    """Lo escrito en la Entrada (título del libro, editorial…) pasa a la ficha como dato a mano."""
+    from . import manual
+    for ruta, datos in con_datos:
+        fila = con.execute("SELECT id FROM docs WHERE ruta=?", (ruta,)).fetchone()
+        cambios = {c: v for c, v in datos.items() if c in manual.CAMPOS and v}
+        if fila and cambios:
+            manual.guardar(con, fila[0], cambios)
 
 
 PAPELERA = "_Papelera"

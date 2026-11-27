@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_entrada.html" import editoriales %}
+{% from "_entrada.html" import editoriales, campos_libro %}
 {% block titulo %}Revisar con el PDF · Entrada{% endblock %}
 {% block contenido %}
 <section class="revisar-pdf" data-entrada="{{ e.id }}">
@@ -60,6 +60,7 @@
           </span>
         </label>
       </fieldset>
+      {{ campos_libro(e) }}
       <label class="renombrar">Renombrar el fichero (opcional) <input type="text" name="nombre" placeholder="{{ e.nombre }}"></label>
       <div class="acciones">
         <button class="boton principal" type="submit" name="accion" value="mover">Mover y siguiente</button>

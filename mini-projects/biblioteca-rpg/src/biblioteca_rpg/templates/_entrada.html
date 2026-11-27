@@ -16,3 +16,28 @@
   {%- if e.publicado %} · Año: {{ e.publicado }}<span class="segun">según el PDF</span>{% endif -%}
   {%- if confianza %} · confianza {{ ((e.confianza or 0) * 100)|round|int }}%{% endif -%}
 {%- endmacro %}
+
+{# Título y editorial al decidir (opcional): pasan a la ficha del libro como datos escritos a mano. #}
+{% macro campos_libro(e) -%}
+  {%- if not e.es_carpeta -%}
+  {%- set claude = ((e.llm or {}).respuesta or {}).editorial or '' -%}
+  <fieldset class="campos-libro">
+    <legend>Datos del libro <span class="tenue">(opcional: pasan a su ficha)</span></legend>
+    <label>Título del libro
+      <input type="text" name="titulo_libro" placeholder="{{ e.titulo_provisional }}" autocomplete="off">
+    </label>
+    <span class="propuestas">
+      <button class="boton mini" type="button" data-rellenar="titulo_libro" data-valor="{{ e.titulo_provisional }}">Usar «{{ e.titulo_provisional|truncate(60) }}»</button>
+    </span>
+    <label>Editorial
+      <input type="text" name="editorial_libro" list="lista-editorial-{{ e.id }}" data-valores="editorial" autocomplete="off">
+      <datalist id="lista-editorial-{{ e.id }}"></datalist>
+    </label>
+    <span class="propuestas">
+      {% if e.editorial %}<button class="boton mini" type="button" data-rellenar="editorial_libro" data-valor="{{ e.editorial }}">{{ e.editorial }} <span class="segun">según el PDF</span></button>{% endif %}
+      {% if claude and claude != '-' and claude|lower != (e.editorial or '')|lower %}<button class="boton mini" type="button" data-rellenar="editorial_libro" data-valor="{{ claude }}">{{ claude }} <span class="segun">según Claude</span></button>{% endif %}
+    </span>
+    <label class="casilla"><input type="checkbox" name="usar_titulo" value="1"> Usar el título del libro como nombre del fichero</label>
+  </fieldset>
+  {%- endif -%}
+{%- endmacro %}

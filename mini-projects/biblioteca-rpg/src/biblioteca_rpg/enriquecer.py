@@ -328,7 +328,8 @@ def _efectivos(extras: dict, nombre: str = "", ruta: str = "", titulo: str = "",
     g = (extras.get("geek") or {}).get("elegido") or {}
     ref = extras.get("ref") or {}  # listas de wikis (referencias.py)
     v: dict = {"publicado": None, "publicado_mes": None, "ext_editorial": None, "autores": None, "isbn": None,
-               "geek_id": None, "geek_tipo": None, "ext_codigo": None, "ext_codigo_orden": None, "ext_titulo": None}
+               "geek_id": None, "geek_tipo": None, "ext_codigo": None, "ext_codigo_orden": None, "ext_titulo": None,
+               "serie": None}
     origen: dict = {}
     # Título del libro: las fichas y las wikis son de la edición en inglés; una traducción se queda
     # con el título del fichero.
@@ -338,6 +339,9 @@ def _efectivos(extras: dict, nombre: str = "", ruta: str = "", titulo: str = "",
             v["ext_titulo"], origen["titulo"] = t, "geek"
         elif ref.get("titulo"):
             v["ext_titulo"], origen["titulo"] = ref["titulo"], "ref"
+    serie = geek_mod.serie_de_ficha(g, titulo or nombre) if g else None
+    if serie:
+        v["serie"], origen["serie"] = serie, "geek"
     if g.get("anio") and _anio_geek_vale(g, ruta):
         v["publicado"], origen["publicado"] = g["anio"], "geek"
         if ref.get("publicado") == g["anio"]:
@@ -382,7 +386,7 @@ def _a_mano(v: dict, man: dict) -> None:
 
 
 COLS = ["publicado", "publicado_mes", "ext_editorial", "autores", "isbn", "geek_id", "geek_tipo", "ext_codigo", "ext_codigo_orden",
-        "ext_titulo", "origen"]
+        "ext_titulo", "serie", "origen"]
 
 
 def aplicar(con, ids: list[int] | None = None) -> int:

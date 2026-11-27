@@ -1,0 +1,106 @@
+{# Los datos de un libro, iguales en todas las pantallas: mismo orden, mismos nombres, y cada valor
+   con de dónde sale. Se importa «with context» (usa d, origen, a_mano, campos, filtro, valor_de, meses). #}
+
+{% macro fuente(campo) -%}
+  {%- set clave = {'ext_titulo': 'titulo', 'publicado_mes': 'publicado'}.get(campo, campo) -%}
+  {%- if campo in a_mano or (campo == 'publicado' and origen.publicado == 'ti (escrito a mano)') -%}
+    <span class="a-mano">escrito a mano</span>
+  {%- elif campo == 'ext_titulo' and not d.ext_titulo -%}
+    <span class="segun">del nombre del fichero</span>
+  {%- elif campo == 'editorial' and d.editorial -%}
+    <span class="segun">según la carpeta</span>
+  {%- elif origen.get(clave) -%}
+    <span class="segun">según {{ origen[clave] }}</span>
+  {%- elif campo in ('sistema', 'edicion', 'tipo', 'ambientacion', 'idioma', 'formato') -%}
+    <span class="segun">según la carpeta</span>
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro entrada_texto(campo, valor, lista=true, ancho=false, placeholder='') -%}
+  <span class="editar">
+    <input name="{{ campo }}" value="{{ valor or '' }}" autocomplete="off" aria-label="{{ campos[campo] }}"
+           {% if placeholder %}placeholder="{{ placeholder }}"{% endif %}
+           {% if lista %}list="lista-{{ campo }}" data-valores="{{ campo }}"{% endif %}>
+    {% if lista %}<datalist id="lista-{{ campo }}"></datalist>{% endif %}
+    <input type="hidden" name="antes_{{ campo }}" value="{{ valor or '' }}">
+  </span>
+{%- endmacro %}
+
+{# Ficha completa; editable: se corrige en su sitio (✎ Corregir datos). #}
+{% macro datos_libro() %}
+<form class="datos-form{% if error %} editando{% endif %}" method="post" action="/libro/{{ d.id }}/datos" id="datos" data-datos>
+  <dl class="datos">
+    <dt>Título del libro</dt>
+    <dd><span class="ver">{{ d.ext_titulo or d.titulo }} {{ fuente('ext_titulo') }}</span>
+      {{ entrada_texto('ext_titulo', d.ext_titulo, lista=false, placeholder=d.titulo) }}</dd>
+    <dt>Fichero</dt>
+    <dd class="ruta">{{ d.ruta }}</dd>
+    {% if d.categoria %}<dt>Categoría</dt><dd><a href="{{ filtro('categoria', d.categoria) }}">{{ d.categoria }}</a></dd>{% endif %}
+
+    {% for campo in ['sistema', 'edicion', 'editorial', 'serie'] %}
+      {% set valor = valor_de(campo) %}
+      <dt>{{ campos[campo] }}</dt>
+      <dd><span class="ver">
+        {%- if not valor %}<span class="vacio">—</span>
+        {%- elif campo == 'editorial' %}
+          {%- set unif = d.editorial_unif or valor %}
+          <a href="{{ filtro('editorial', unif) }}">{{ unif }}</a> {{ fuente(campo) }}
+          {%- if unif != valor %}<span class="segun">aparece como «{{ valor }}»</span>{% endif %}
+        {%- else %}<a href="{{ filtro(campo, valor) }}">{{ valor }}</a> {{ fuente(campo) }}{% endif -%}
+        </span>{{ entrada_texto(campo, valor) }}</dd>
+    {% endfor %}
+
+    {% if d.codigo or d.ext_codigo %}
+      <dt>Código</dt><dd>{{ d.codigo or d.ext_codigo }}<span class="segun">{{ 'según el nombre del fichero' if d.codigo else 'según el PDF' }}</span></dd>
+    {% endif %}
+
+    <dt>Publicado</dt>
+    <dd><span class="ver">{% if d.publicado %}{% if d.publicado_mes %}{{ meses[d.publicado_mes - 1] }} de {% endif %}<a href="{{ filtro('decada', (d.publicado // 10) * 10) }}">{{ d.publicado }}</a> {{ fuente('publicado') }}
+        {%- else %}<span class="vacio">—</span>{% endif %}</span>
+      <span class="editar fila-editar">
+        <select name="publicado_mes" aria-label="{{ campos.publicado_mes }}">
+          <option value="">— mes —</option>
+          {% for m in meses %}<option value="{{ loop.index }}" {% if d.publicado_mes == loop.index %}selected{% endif %}>{{ m }}</option>{% endfor %}
+        </select>
+        <input type="hidden" name="antes_publicado_mes" value="{{ d.publicado_mes or '' }}">
+        <input name="publicado" value="{{ d.publicado or '' }}" inputmode="numeric" pattern="\d{4}" placeholder="año" aria-label="{{ campos.publicado }}">
+        <input type="hidden" name="antes_publicado" value="{{ d.publicado or '' }}">
+      </span></dd>
+    {% if d.anio and d.anio != d.publicado %}<dt>{{ 'Año de la edición' if d.publicado else 'Año' }}</dt><dd>{{ d.anio }}<span class="segun">según la carpeta</span></dd>{% endif %}
+
+    {% for campo in ['tipo', 'ambientacion', 'idioma', 'formato', 'autores'] %}
+      {% set valor = valor_de(campo) %}
+      <dt>{{ campos[campo] }}</dt>
+      <dd><span class="ver">
+        {%- if not valor %}<span class="vacio">—</span>
+        {%- elif campo == 'autores' %}{{ valor }} {{ fuente(campo) }}
+        {%- else %}<a href="{{ filtro(campo, valor) }}">{{ valor }}</a> {{ fuente(campo) }}{% endif -%}
+        </span>{{ entrada_texto(campo, valor) }}</dd>
+    {% endfor %}
+
+    {% if d.pdf_titulo and d.pdf_titulo|lower not in (d.titulo|lower, (d.ext_titulo or '')|lower) %}<dt>Título interno del PDF</dt><dd>{{ d.pdf_titulo }}</dd>{% endif %}
+    {% if d.pdf_autor %}<dt>Autor (PDF)</dt><dd>{{ d.pdf_autor }}</dd>{% endif %}
+    {% if d.isbn %}<dt>ISBN</dt><dd>{{ d.isbn }}<span class="segun">según el PDF</span></dd>{% endif %}
+    {% if d.paginas %}<dt>Páginas</dt><dd>{{ d.paginas }}</dd>{% endif %}
+    <dt>Tamaño</dt><dd>{{ d.tamano|tamano }}</dd>
+    <dt>En la biblioteca desde</dt><dd>{{ d.llegado_en|fecha }}</dd>
+    {% if d.error %}<dt>Aviso</dt><dd class="aviso">No se pudo leer el fichero: {{ d.error }}</dd>{% endif %}
+  </dl>
+  {% if error %}<p class="aviso">{{ error }}</p>{% endif %}
+  {% if guardado %}<p class="hecho">{{ 'Guardado.' if guardado != '0' else 'No había nada que cambiar.' }}</p>{% endif %}
+  <div class="acciones">
+    <button class="boton ver" type="button" data-editar-datos>✎ Corregir datos</button>
+    <button class="boton principal editar" type="submit">Guardar</button>
+    <button class="boton editar" type="button" data-cancelar-datos>Cancelar</button>
+    <span class="tenue editar">Lo que escribas manda sobre lo deducido; vacía un campo para volver al dato automático.</span>
+  </div>
+</form>
+{% endmacro %}
+
+{# Resumen de una línea (listas de revisar): mismos nombres que la ficha. #}
+{% macro resumen_libro(it) -%}
+  {%- set ed = it.editorial_unif or it.editorial or it.ext_editorial -%}
+  {%- set partes = [('Sistema: ' ~ it.sistema) if it.sistema else None, ('Editorial: ' ~ ed) if ed else None,
+                   ('Serie: ' ~ it.serie) if it.serie else None, ('Año: ' ~ (it.publicado or it.anio)) if (it.publicado or it.anio) else None] -%}
+  {{ partes|select|join(' · ') }}
+{%- endmacro %}

@@ -12,8 +12,8 @@ DE_RUTA = {
     "sistema": "Sistema / línea", "edicion": "Edición", "editorial": "Editorial", "tipo": "Tipo",
     "ambientacion": "Ambientación", "idioma": "Idioma", "formato": "Formato",
 }
-DE_EXTRA = {"ext_titulo": "Título del libro", "publicado": "Año de publicación", "publicado_mes": "Mes de publicación",
-            "autores": "Autores"}
+DE_EXTRA = {"ext_titulo": "Título del libro", "serie": "Serie / colección", "publicado": "Año de publicación",
+            "publicado_mes": "Mes de publicación", "autores": "Autores"}
 CAMPOS = {**DE_RUTA, **DE_EXTRA}
 ENTEROS = {"publicado": (1900, 2100), "publicado_mes": (1, 12)}
 

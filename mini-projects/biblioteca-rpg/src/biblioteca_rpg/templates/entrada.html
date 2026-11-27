@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_entrada.html" import datos_entrada %}
+{% from "_entrada.html" import datos_entrada, campos_libro %}
 {% block titulo %}Entrada · Biblioteca{% endblock %}
 {% block contenido %}
 {% macro grupo_form(g, vista) %}
@@ -125,6 +125,7 @@
               </span>
             </label>
           </fieldset>
+          {{ campos_libro(e) }}
           <label class="renombrar">Renombrar el fichero (opcional) <input type="text" name="nombre" placeholder="{{ e.nombre }}"></label>
           <div class="acciones">
             <button class="boton principal" type="submit" name="accion" value="mover">Mover</button>

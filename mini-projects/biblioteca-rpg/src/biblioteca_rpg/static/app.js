@@ -402,3 +402,23 @@ document.querySelectorAll("[data-valores]").forEach((input) => {
     }
   });
 })();
+
+// Ficha: «✎ Corregir datos» cambia la lista de datos por sus campos; «Cancelar» la deja como estaba.
+document.querySelectorAll("[data-datos]").forEach((form) => {
+  form.querySelector("[data-editar-datos]")?.addEventListener("click", () => {
+    form.classList.add("editando");
+    form.querySelector(".editar input:not([type=hidden])")?.focus();
+  });
+  form.querySelector("[data-cancelar-datos]")?.addEventListener("click", () => {
+    form.reset();
+    form.classList.remove("editando");
+  });
+});
+
+// Entrada: botones que rellenan un campo con una propuesta («AEG según el PDF»).
+document.querySelectorAll("[data-rellenar]").forEach((b) => {
+  b.addEventListener("click", () => {
+    const input = b.closest("form").querySelector(`[name="${b.dataset.rellenar}"]`);
+    if (input) { input.value = b.dataset.valor; input.focus(); }
+  });
+});

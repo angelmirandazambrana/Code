@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_geek.html" import candidatos %}
+{% from "_datos.html" import datos_libro with context %}
 {% block titulo %}{{ d.ext_titulo or d.titulo }} · Biblioteca{% endblock %}
 {% block contenido %}
 <nav class="migas ficha-migas" aria-label="Carpeta">
@@ -14,9 +15,6 @@
   <div class="ficha-datos">
     <p class="ficha-sistema">{% if d.sistema %}<a href="{{ filtro('sistema', d.sistema) }}">{{ d.sistema }}</a>{% else %}{{ d.categoria }}{% endif %}</p>
     <h1>{{ d.ext_titulo or d.titulo }}</h1>
-    {% if d.ext_titulo %}<p class="tenue">{% if 'ext_titulo' in a_mano %}<span class="a-mano">escrito a mano</span>{% else %}<span class="segun">título según {{ origen.titulo }}</span>{% endif %}
-      {% if d.ext_titulo|lower != d.titulo|lower %} · en el fichero: {{ d.titulo }}{% endif %}</p>{% endif %}
-    {% if d.pdf_titulo and d.pdf_titulo|lower not in (d.titulo|lower, (d.ext_titulo or '')|lower) %}<p class="tenue">Título interno del PDF: {{ d.pdf_titulo }}</p>{% endif %}
 
     <div class="acciones">
       <a class="boton principal" href="/pdf/{{ d.id }}/{{ d.nombre|qp }}" {% if d.nombre|ext == 'PDF' %}target="_blank" rel="noopener">Abrir PDF{% else %}download>Descargar {{ d.nombre|ext }}{% endif %}</a>
@@ -45,81 +43,7 @@
     </div>
     {% endif %}
 
-    <dl class="datos" id="datos">
-      {% if d.categoria %}<dt>Categoría</dt><dd><a href="{{ filtro('categoria', d.categoria) }}">{{ d.categoria }}</a></dd>{% endif %}
-      {% for campo in ['sistema', 'edicion', 'editorial', 'tipo', 'ambientacion', 'idioma', 'formato'] %}
-        {% set valor = valor_de(campo) %}
-        <dt>{{ campos[campo] }}</dt>
-        <dd>
-        {% if not valor %}<span class="vacio">—</span>
-        {% elif campo == 'editorial' %}
-          {% set unif = d.editorial_unif or valor %}
-          <a href="{{ filtro('editorial', unif) }}">{{ unif }}</a>
-          {% if 'editorial' in a_mano %}<span class="a-mano">escrito a mano</span>
-          {% elif not d.editorial %}<span class="segun">según {{ origen.editorial }}</span>{% endif %}
-          {% if unif != valor %}<span class="segun">aparece como «{{ valor }}»</span>{% endif %}
-        {% else %}
-          <a href="{{ filtro(campo, valor) }}">{{ valor }}</a>
-          {% if campo in a_mano %}<span class="a-mano">escrito a mano</span>{% endif %}
-        {% endif %}
-        </dd>
-      {% endfor %}
-      <dt>Publicado</dt>
-      <dd>{% if d.publicado %}{% if d.publicado_mes %}{{ meses[d.publicado_mes - 1] }} de {% endif %}<a href="{{ filtro('decada', (d.publicado // 10) * 10) }}">{{ d.publicado }}</a>
-        {% if origen.publicado == 'ti (escrito a mano)' %}<span class="a-mano">escrito a mano</span>{% else %}<span class="segun">según {{ origen.publicado }}</span>{% endif %}
-        {% else %}<span class="vacio">—</span>{% endif %}</dd>
-      <dt>Autores</dt>
-      <dd>{% if d.autores %}{{ d.autores }}
-        {% if 'autores' in a_mano %}<span class="a-mano">escrito a mano</span>{% else %}<span class="segun">según {{ origen.autores }}</span>{% endif %}
-        {% else %}<span class="vacio">—</span>{% endif %}</dd>
-      {% if d.codigo or d.ext_codigo %}
-        <dt>Código</dt><dd>{{ d.codigo or d.ext_codigo }}{% if not d.codigo %} <span class="segun">según el PDF</span>{% endif %}</dd>
-      {% endif %}
-      {% if d.anio and d.anio != d.publicado %}<dt>{{ 'Año de la edición' if d.publicado else 'Año' }}</dt><dd>{{ d.anio }}</dd>{% endif %}
-      {% if d.isbn %}<dt>ISBN</dt><dd>{{ d.isbn }}</dd>{% endif %}
-      {% if d.pdf_autor %}<dt>Autor (PDF)</dt><dd>{{ d.pdf_autor }}</dd>{% endif %}
-      {% if d.paginas %}<dt>Páginas</dt><dd>{{ d.paginas }}</dd>{% endif %}
-      <dt>Tamaño</dt><dd>{{ d.tamano|tamano }}</dd>
-      <dt>En la biblioteca desde</dt><dd>{{ d.llegado_en|fecha }}</dd>
-      <dt>Fichero</dt><dd class="ruta">{{ d.ruta }}</dd>
-      {% if d.error %}<dt>Aviso</dt><dd class="aviso">No se pudo leer el fichero: {{ d.error }}</dd>{% endif %}
-    </dl>
-
-    {% if error %}<p class="aviso">{{ error }}</p>{% endif %}
-    {% if guardado %}<p class="hecho">{{ 'Guardado.' if guardado != '0' else 'No había nada que cambiar.' }}</p>{% endif %}
-    <details class="editar-datos" {% if error %}open{% endif %}>
-      <summary>✎ Corregir o completar datos</summary>
-      <form method="post" action="/libro/{{ d.id }}/datos">
-        <p class="tenue">Escribe y elige de la lista los valores que ya hay en la biblioteca (o pon uno nuevo).
-          Lo que escribas manda sobre lo deducido. Vacía un campo para volver al dato automático.</p>
-        <div class="campos-editar">
-          <label class="ancho">{{ campos.ext_titulo }}
-            <input name="ext_titulo" value="{{ d.ext_titulo or '' }}" placeholder="{{ d.titulo }}" autocomplete="off">
-            <input type="hidden" name="antes_ext_titulo" value="{{ d.ext_titulo or '' }}">
-          </label>
-        {% for campo in ['sistema', 'edicion', 'editorial', 'tipo', 'ambientacion', 'idioma', 'formato', 'autores'] %}
-          {% set valor = valor_de(campo) or '' %}
-          <label>{{ campos[campo] }}
-            <input name="{{ campo }}" value="{{ valor }}" list="lista-{{ campo }}" data-valores="{{ campo }}" autocomplete="off">
-            <datalist id="lista-{{ campo }}"></datalist>
-            <input type="hidden" name="antes_{{ campo }}" value="{{ valor }}">
-          </label>
-        {% endfor %}
-          <label>{{ campos.publicado }}
-            <input name="publicado" value="{{ d.publicado or '' }}" inputmode="numeric" pattern="\d{4}" placeholder="p. ej. 1996">
-            <input type="hidden" name="antes_publicado" value="{{ d.publicado or '' }}">
-          </label>
-          <label>{{ campos.publicado_mes }}
-            <select name="publicado_mes">
-              <option value="">—</option>
-              {% for m in meses %}<option value="{{ loop.index }}" {% if d.publicado_mes == loop.index %}selected{% endif %}>{{ m }}</option>{% endfor %}
-            </select>
-            <input type="hidden" name="antes_publicado_mes" value="{{ d.publicado_mes or '' }}">
-          </label>
-        </div>
-        <button class="boton principal" type="submit">Guardar</button>
-      </form>
-    </details>
+    {{ datos_libro() }}
 
     {% set g = extras.get('geek') %}
     {% if g and g.estado in ('auto', 'aceptado') and g.datos.elegido %}

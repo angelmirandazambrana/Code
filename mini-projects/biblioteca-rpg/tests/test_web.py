@@ -181,7 +181,7 @@ def test_datos_a_mano_mandan_y_se_conservan(cliente):
     r = cliente.get("/", params={"q": "Dragon 100"})
     doc_id = int(re.search(r'href="/libro/(\d+)"', r.text).group(1))
     ficha = cliente.get(f"/libro/{doc_id}").text
-    assert "Sistema / línea" in ficha and "Corregir o completar datos" in ficha  # vacío, pero se ve y se edita
+    assert "Sistema / línea" in ficha and "✎ Corregir datos" in ficha  # vacío, pero se ve y se edita
 
     r = cliente.post(f"/libro/{doc_id}/datos", data={
         "sistema": "Deadlands", "antes_sistema": "", "editorial": "Pinnacle", "antes_editorial": "",
@@ -249,7 +249,6 @@ def test_titulo_del_libro(cliente):
     r = cliente.get("/", params={"q": "Dragon 100"})
     doc_id = int(re.search(r'href="/libro/(\d+)"', r.text).group(1))
     con = db.conectar(config.cargar().db)
-    titulo = con.execute("SELECT titulo FROM docs WHERE id=?", (doc_id,)).fetchone()[0]
     # De RPGGeek: se ve en la ficha y en la lista, y se encuentra buscándolo; el del fichero sigue ahí.
     with con:
         con.execute("INSERT INTO extra (doc_id, fuente, estado, datos) VALUES (?, 'geek', 'aceptado', ?)",
@@ -257,7 +256,7 @@ def test_titulo_del_libro(cliente):
         enriquecer.aplicar(con, [doc_id])
     assert con.execute("SELECT ext_titulo FROM docs WHERE id=?", (doc_id,)).fetchone()[0] == "Dragon Magazine #100"
     ficha = cliente.get(f"/libro/{doc_id}").text
-    assert "<h1>Dragon Magazine #100</h1>" in ficha and "según RPGGeek" in ficha and f"en el fichero: {titulo}" in ficha
+    assert "<h1>Dragon Magazine #100</h1>" in ficha and "según RPGGeek" in ficha and "<dt>Fichero</dt>" in ficha and "del nombre del fichero" not in ficha
     assert "Dragon Magazine #100" in cliente.get("/", params={"q": "magazine"}).text
     # A mano manda; vaciarlo devuelve el de RPGGeek.
     cliente.post(f"/libro/{doc_id}/datos", data={"ext_titulo": "El dragón cien", "antes_ext_titulo": "Dragon Magazine #100"})
@@ -291,3 +290,36 @@ def test_busca_tambien_en_la_entrada(cliente):
         t = cliente.get(pagina).text
         assert "según Claude" in t, pagina
     assert "Renombrar el fichero (opcional)" in cliente.get("/entrada").text
+
+
+def test_entrada_datos_del_libro_pasan_a_la_ficha(cliente, tmp_path):
+    import json
+    import os
+    from pathlib import Path
+
+    from biblioteca_rpg import config, db, entrada
+    cfg = config.cargar()
+    raiz = Path(os.environ["BIBLIOTECA_RAIZ"])
+    (raiz / "_Inbox").mkdir(exist_ok=True)
+    (raiz / "_Inbox" / "2WS1100e Masters of Arms 3.5 [OEF].pdf").write_bytes(b"%PDF-1.4 falso")
+    con = db.conectar(cfg.db)
+    llm = {"origen": "lote", "juego": "D&D", "respuesta": {"editorial": "Second World Simulations"}}
+    with con:
+        con.execute("INSERT INTO entrada (id, nombre, ruta_actual, es_carpeta, estado, editorial, pdf_titulo, alternativas, llm) "
+                    "VALUES (90, '2WS1100e Masters of Arms 3.5 [OEF].pdf', '_Inbox/2WS1100e Masters of Arms 3.5 [OEF].pdf', "
+                    "0, 'pendiente', 'AEG', 'Masters of Arms 3.5', '[]', ?)", (json.dumps(llm),))
+    t = cliente.get("/entrada/revisar?id=90").text
+    assert 'placeholder="Masters of Arms 3.5"' in t and 'data-valor="Second World Simulations"' in t
+    destino = next(c for c in cfg.areas)  # una carpeta válida cualquiera
+    r = cliente.post("/entrada/90", data={"accion": "mover", "destino": "__otra", "destino_otra": destino + "/Pruebas",
+                                          "titulo_libro": "Masters of Arms: 3.5", "editorial_libro": "Second World Simulations",
+                                          "usar_titulo": "1"}, follow_redirects=False)
+    assert r.status_code == 303
+    f = con.execute("SELECT nuevo_nombre, a_mano FROM entrada WHERE id=90").fetchone()
+    assert f["nuevo_nombre"] == "Masters of Arms - 3.5.pdf"
+    assert json.loads(f["a_mano"]) == {"ext_titulo": "Masters of Arms: 3.5", "editorial": "Second World Simulations"}
+    entrada.ejecutar_aprobados(con, cfg, lambda *a: None)
+    d = con.execute("SELECT id, ruta, ext_titulo, editorial FROM docs WHERE ruta LIKE '%Masters of Arms%'").fetchone()
+    assert d and d["ruta"].endswith("/Pruebas/Masters of Arms - 3.5.pdf")
+    assert (d["ext_titulo"], d["editorial"]) == ("Masters of Arms: 3.5", "Second World Simulations")
+    assert "escrito a mano" in cliente.get(f"/libro/{d['id']}").text

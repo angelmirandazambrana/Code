@@ -325,7 +325,7 @@ async def guardar_datos(request: Request, doc_id: int):
 @app.get("/api/valores")
 def api_valores(campo: str, q: str = ""):
     """Valores que ya hay en el catálogo para un campo (para el desplegable de la ficha)."""
-    if campo not in manual_mod.DE_RUTA and campo != "autores":
+    if campo not in manual_mod.DE_RUTA and campo not in ("autores", "serie"):
         return JSONResponse([])
     con = _con()
 
@@ -369,7 +369,7 @@ def revisar(request: Request, pagina: int = 1):
     total = con.execute("SELECT COUNT(*) FROM extra WHERE fuente='geek' AND estado='pendiente'").fetchone()[0]
     por_pagina = 30
     filas = con.execute(
-        "SELECT d.id, COALESCE(d.ext_titulo, d.titulo) AS titulo, d.carpeta, d.sistema, d.editorial, d.ext_editorial, d.editorial_unif, d.publicado, d.anio, "
+        "SELECT d.id, COALESCE(d.ext_titulo, d.titulo) AS titulo, d.titulo AS titulo_fichero, d.nombre, d.serie, d.carpeta, d.sistema, d.editorial, d.ext_editorial, d.editorial_unif, d.publicado, d.anio, "
         "e.confianza, e.datos FROM extra e JOIN docs d ON d.id = e.doc_id "
         "WHERE e.fuente='geek' AND e.estado='pendiente' ORDER BY e.confianza DESC, d.id "
         f"LIMIT {por_pagina} OFFSET {(max(pagina, 1) - 1) * por_pagina}"
@@ -540,10 +540,7 @@ def entrada(request: Request, vista: str = ""):
     def lista(sql, *params):
         out = []
         for f in con.execute(sql, params):
-            e = dict(f)
-            e["alternativas"] = json.loads(e["alternativas"] or "[]")
-            e["llm"] = json.loads(e["llm"]) if e.get("llm") else None
-            out.append(e)
+            out.append(_entrada_dict(f))
         return out
 
     pendientes = lista("SELECT * FROM entrada WHERE estado IN ('pendiente', 'error') ORDER BY llegado_en, id")
@@ -597,7 +594,27 @@ def _entrada_dict(f) -> dict:
     e = dict(f)
     e["alternativas"] = json.loads(e["alternativas"] or "[]")
     e["llm"] = json.loads(e["llm"]) if e.get("llm") else None
+    e["titulo_provisional"] = titulo_provisional(e)
     return e
+
+
+RE_TITULO_PDF_MALO = re.compile(r"microsoft|untitled|sin t[ií]tulo|^document|adobe|\.(docx?|indd|pdf|qxd|rtf|odt)\b|^\W*$", re.I)
+
+
+def titulo_provisional(e: dict) -> str:
+    """Lo que parece el título del libro mientras está en la Entrada: el título interno del PDF si
+    es razonable («Masters of Arms 3.5»), si no el nombre del fichero sin extensión."""
+    t = " ".join((e.get("pdf_titulo") or "").split())
+    if len(t) >= 4 and re.search(r"[A-Za-zÀ-ÿ]{3}", t) and not RE_TITULO_PDF_MALO.search(t):
+        return t
+    from .rutas import titulo_de
+    return titulo_de(e.get("nombre") or "")
+
+
+def nombre_de_fichero(titulo: str) -> str:
+    """«Masters of Arms: 3.5?» -> «Masters of Arms - 3.5» (sin caracteres que Windows no admite)."""
+    t = re.sub(r'\s*[\\/:*?"<>|]+\s*', " - ", titulo)
+    return re.sub(r"\s+", " ", t).strip(" .-")[:180]
 
 
 @app.get("/entrada/revisar", response_class=HTMLResponse)
@@ -636,10 +653,11 @@ def api_explicar(entrada_id: int, texto: Annotated[str, Form()] = ""):
 @app.post("/entrada/{entrada_id}")
 def decidir_entrada(entrada_id: int, accion: str = Form(...), destino: str = Form(""),
                     destino_otra: str = Form(""), nombre: str = Form(""),
-                    explicacion_id: str = Form(""), volver: str = Form("")):
+                    explicacion_id: str = Form(""), volver: str = Form(""),
+                    titulo_libro: str = Form(""), editorial_libro: str = Form(""), usar_titulo: str = Form("")):
     """La web solo anota la decisión; el clasificador (el único que escribe en la biblioteca) la ejecuta."""
     con = _con()
-    e = con.execute("SELECT estado FROM entrada WHERE id=?", (entrada_id,)).fetchone()
+    e = con.execute("SELECT estado, nombre, es_carpeta FROM entrada WHERE id=?", (entrada_id,)).fetchone()
     if not e:
         raise HTTPException(404, "No existe")
     if e["estado"] in ("nuevo", "aprobado", "desaparecido"):
@@ -656,14 +674,20 @@ def decidir_entrada(entrada_id: int, accion: str = Form(...), destino: str = For
             raise HTTPException(400, f"Carpeta no válida: «{elegido}». Tiene que empezar por "
                                      f"{', '.join(cfg.areas)}.")
         limpio = nombre.strip()
+        titulo_libro = " ".join(titulo_libro.split())[:200]
+        if not limpio and usar_titulo and titulo_libro and not e["es_carpeta"]:
+            limpio = nombre_de_fichero(titulo_libro) + Path(e["nombre"]).suffix
         if limpio and ("/" in limpio or "\\" in limpio or limpio.startswith(".")):
             raise HTTPException(400, "Nombre no válido")
         cambios = ("aprobado", valido, limpio or None, 0)
+        a_mano = {k: v for k, v in (("ext_titulo", titulo_libro), ("editorial", " ".join(editorial_libro.split())[:200]))
+                  if v and not e["es_carpeta"]}
     else:
         raise HTTPException(400, "Acción desconocida")
     with con:
-        con.execute("UPDATE entrada SET estado=?, destino=?, nuevo_nombre=?, auto=?, decidido_en=?, nota=NULL "
-                    "WHERE id=?", (*cambios, ahora, entrada_id))
+        con.execute("UPDATE entrada SET estado=?, destino=?, nuevo_nombre=?, auto=?, decidido_en=?, nota=NULL, a_mano=? "
+                    "WHERE id=?", (*cambios, ahora, json.dumps(a_mano, ensure_ascii=False) if accion == "mover" and a_mano
+                                   else None, entrada_id))
     if explicacion_id.strip().isdigit() and accion == "mover":  # vacío si no se pidió propuesta
         explicar_mod.confirmar(con, int(explicacion_id), entrada_id, cambios[1])
     # Desde «Revisar con el PDF» se vuelve allí (al siguiente); solo rutas propias de la Entrada.

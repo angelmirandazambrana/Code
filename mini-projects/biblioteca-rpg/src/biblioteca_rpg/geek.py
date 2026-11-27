@@ -420,6 +420,16 @@ def _sin_parentesis(n: str) -> str:
     return RE_ETIQUETA.sub("", n).strip() or n
 
 
+def serie_de_ficha(elegido: dict, titulo_archivo: str = "") -> str | None:
+    """La serie del libro según RPGGeek: la que nombra el fichero, si alguna; si no, la primera.
+    (BoardGameGeek llama «familia» a otra cosa: de ahí no se toma.)"""
+    series = [_sin_parentesis(s) for s in elegido.get("serie") or [] if s]
+    if elegido.get("tipo") == "boardgame" or not series:
+        return None
+    nb = f" {normalizar(titulo_archivo)} "
+    return next((s for s in series if f" {normalizar(s)} " in nb), series[0])
+
+
 def titulo_de_ficha(elegido: dict, titulo_archivo: str = "") -> str | None:
     """El nombre del libro según su ficha de RPGGeek, para mostrarlo en vez del del fichero.
 

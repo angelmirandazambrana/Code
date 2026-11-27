@@ -453,3 +453,24 @@ kbd {
 .en-entrada { margin: 0 0 1.5rem; padding: .75rem 1rem; border: 1px solid var(--borde); border-radius: 8px; background: var(--superficie); }
 .en-entrada h2 { font-size: 16px; margin: 0 0 .25rem; }
 .en-entrada p { margin: 0 0 .5rem; }
+
+/* Datos del libro: se corrigen en su sitio */
+.datos-form:not(.editando) .editar { display: none; }
+.datos-form.editando .ver { display: none; }
+.datos-form .editar input, .datos-form .editar select { font: inherit; font-size: 15px; padding: .3rem .45rem; color: inherit;
+  background: var(--superficie); border: 1px solid var(--borde); border-radius: 6px; width: 100%; box-sizing: border-box; }
+.datos-form .fila-editar { display: flex; gap: .5rem; }
+.datos-form .fila-editar select { width: auto; }
+.datos-form .fila-editar input[name=publicado] { width: 7em; }
+.datos-form .acciones { margin-top: .75rem; align-items: center; }
+.datos-form.editando .datos { row-gap: 8px; }
+
+/* Entrada: datos del libro al decidir */
+.campos-libro { border: 1px solid var(--borde); border-radius: 8px; padding: .5rem .75rem .75rem; margin: 8px 0 0;
+  display: grid; grid-template-columns: 1fr; gap: .35rem; font-size: 13px; color: var(--tenue); }
+.campos-libro legend { padding: 0 .25rem; color: inherit; }
+.campos-libro label { display: flex; flex-direction: column; gap: .2rem; }
+.campos-libro input[type=text] { font: inherit; font-size: 15px; padding: .35rem .5rem; color: var(--texto, inherit);
+  background: var(--superficie); border: 1px solid var(--borde); border-radius: 6px; }
+.campos-libro .propuestas { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: .25rem; }
+.campos-libro .casilla { flex-direction: row; align-items: center; gap: .4rem; }
