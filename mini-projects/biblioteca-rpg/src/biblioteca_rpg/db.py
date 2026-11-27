@@ -31,24 +31,6 @@ CREATE INDEX IF NOT EXISTS ix_carpeta ON docs(carpeta);
 CREATE INDEX IF NOT EXISTS ix_llegado ON docs(llegado_en);
 CREATE INDEX IF NOT EXISTS ix_portada ON docs(portada);
 
-CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
-    titulo, carpeta, pdf_titulo, pdf_autor,
-    content='docs', content_rowid='id', tokenize='unicode61 remove_diacritics 2'
-);
-CREATE TRIGGER IF NOT EXISTS docs_ai AFTER INSERT ON docs BEGIN
-    INSERT INTO docs_fts(rowid, titulo, carpeta, pdf_titulo, pdf_autor)
-    VALUES (new.id, new.titulo, new.carpeta, new.pdf_titulo, new.pdf_autor);
-END;
-CREATE TRIGGER IF NOT EXISTS docs_ad AFTER DELETE ON docs BEGIN
-    INSERT INTO docs_fts(docs_fts, rowid, titulo, carpeta, pdf_titulo, pdf_autor)
-    VALUES ('delete', old.id, old.titulo, old.carpeta, old.pdf_titulo, old.pdf_autor);
-END;
-CREATE TRIGGER IF NOT EXISTS docs_au AFTER UPDATE OF titulo, carpeta, pdf_titulo, pdf_autor ON docs BEGIN
-    INSERT INTO docs_fts(docs_fts, rowid, titulo, carpeta, pdf_titulo, pdf_autor)
-    VALUES ('delete', old.id, old.titulo, old.carpeta, old.pdf_titulo, old.pdf_autor);
-    INSERT INTO docs_fts(rowid, titulo, carpeta, pdf_titulo, pdf_autor)
-    VALUES (new.id, new.titulo, new.carpeta, new.pdf_titulo, new.pdf_autor);
-END;
 
 -- Datos que no salen de la ruta: del texto del PDF ('pdf') o de RPGGeek/BGG ('geek').
 -- estado: auto (aceptado por confianza), aceptado / rechazado (a mano), pendiente (revisar),
@@ -191,6 +173,7 @@ COLUMNAS_EXTRA = {
     "codigo_orden": "TEXT",      # el mismo, con el número alineado para ordenar (codigos.orden)
     "ext_codigo": "TEXT",        # código sacado del texto del PDF, si el nombre no lo tiene
     "ext_codigo_orden": "TEXT",
+    "ext_titulo": "TEXT",        # título del libro (RPGGeek, wikis o a mano) si no es el del fichero
 }
 
 # Editorial unificada: forma -> nombre (lo rellena editoriales.recalcular) y disparadores que
@@ -215,6 +198,50 @@ COLUMNAS_ENTRADA = {
     "origen_texto": "TEXT",      # mensaje de Telegram que acompañaba al fichero
     "llm": "TEXT",               # lo que dijo Claude (JSON: carpeta, seguridad, juego, tipo, motivo)
 }
+
+# Búsqueda de texto. Va aparte del esquema porque usa columnas que añade _migrar (ext_titulo).
+_FTS_COLS = "titulo, ext_titulo, carpeta, pdf_titulo, pdf_autor"
+_FTS_NEW = "new.id, new.titulo, new.ext_titulo, new.carpeta, new.pdf_titulo, new.pdf_autor"
+_FTS_OLD = "old.id, old.titulo, old.ext_titulo, old.carpeta, old.pdf_titulo, old.pdf_autor"
+ESQUEMA_FTS = f"""
+CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
+    {_FTS_COLS},
+    content='docs', content_rowid='id', tokenize='unicode61 remove_diacritics 2'
+);
+CREATE TRIGGER IF NOT EXISTS docs_ai AFTER INSERT ON docs BEGIN
+    INSERT INTO docs_fts(rowid, {_FTS_COLS}) VALUES ({_FTS_NEW});
+END;
+CREATE TRIGGER IF NOT EXISTS docs_ad AFTER DELETE ON docs BEGIN
+    INSERT INTO docs_fts(docs_fts, rowid, {_FTS_COLS}) VALUES ('delete', {_FTS_OLD});
+END;
+CREATE TRIGGER IF NOT EXISTS docs_au AFTER UPDATE OF {_FTS_COLS} ON docs BEGIN
+    INSERT INTO docs_fts(docs_fts, rowid, {_FTS_COLS}) VALUES ('delete', {_FTS_OLD});
+    INSERT INTO docs_fts(rowid, {_FTS_COLS}) VALUES ({_FTS_NEW});
+END;
+"""
+
+
+def _crear_fts(con: sqlite3.Connection) -> None:
+    """Crea la búsqueda; si es de antes de ext_titulo, la rehace (una vez, unos segundos)."""
+    def vieja() -> bool:
+        if not con.execute("SELECT 1 FROM sqlite_master WHERE name='docs_fts'").fetchone():
+            return False
+        return "ext_titulo" not in {r[1] for r in con.execute("PRAGMA table_info(docs_fts)")}
+
+    rehacer = False
+    if vieja():
+        con.commit()
+        con.execute("BEGIN IMMEDIATE")  # otro contenedor puede estar haciendo lo mismo al arrancar
+        if vieja():
+            for sql in ("DROP TRIGGER IF EXISTS docs_ai", "DROP TRIGGER IF EXISTS docs_ad",
+                        "DROP TRIGGER IF EXISTS docs_au", "DROP TABLE docs_fts"):
+                con.execute(sql)
+            rehacer = True
+        con.commit()
+    con.executescript(ESQUEMA_FTS)
+    if rehacer:
+        con.execute("INSERT INTO docs_fts(docs_fts) VALUES ('rebuild')")
+        con.commit()
 
 
 def conectar(ruta: Path, solo_lectura: bool = False) -> sqlite3.Connection:
@@ -242,6 +269,7 @@ def _migrar(con: sqlite3.Connection) -> None:
                 except sqlite3.OperationalError as ex:  # otro proceso la creó a la vez
                     if "duplicate column" not in str(ex):
                         raise
+    _crear_fts(con)
     con.execute("CREATE INDEX IF NOT EXISTS ix_ext_editorial ON docs(ext_editorial)")
     con.executescript(ESQUEMA_EDITORIALES)
     if "editorial_unif" in nuevas:  # hasta que se recalculen los alias, la editorial tal cual

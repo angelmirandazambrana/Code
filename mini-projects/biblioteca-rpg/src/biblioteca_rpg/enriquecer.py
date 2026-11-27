@@ -321,14 +321,23 @@ def _anio_geek_vale(g: dict, ruta: str) -> bool:
     return not ruta or analizar(ruta).tipo in TIPOS_DEL_PROPIO_JUEGO
 
 
-def _efectivos(extras: dict, nombre: str = "", ruta: str = "") -> dict:
-    """extras: {fuente: datos} ya aceptados -> columnas del catálogo (el nombre, para el año si falta)."""
+def _efectivos(extras: dict, nombre: str = "", ruta: str = "", titulo: str = "", idioma: str | None = None) -> dict:
+    """extras: {fuente: datos} ya aceptados -> columnas del catálogo (el nombre, para el año si falta;
+    el título del fichero y el idioma, para el título del libro)."""
     pdf = extras.get("pdf") or {}
     g = (extras.get("geek") or {}).get("elegido") or {}
     ref = extras.get("ref") or {}  # listas de wikis (referencias.py)
     v: dict = {"publicado": None, "publicado_mes": None, "ext_editorial": None, "autores": None, "isbn": None,
-               "geek_id": None, "geek_tipo": None, "ext_codigo": None, "ext_codigo_orden": None}
+               "geek_id": None, "geek_tipo": None, "ext_codigo": None, "ext_codigo_orden": None, "ext_titulo": None}
     origen: dict = {}
+    # Título del libro: las fichas y las wikis son de la edición en inglés; una traducción se queda
+    # con el título del fichero.
+    if not idioma:
+        t = geek_mod.titulo_de_ficha(g, titulo or nombre) if g else None
+        if t:
+            v["ext_titulo"], origen["titulo"] = t, "geek"
+        elif ref.get("titulo"):
+            v["ext_titulo"], origen["titulo"] = ref["titulo"], "ref"
     if g.get("anio") and _anio_geek_vale(g, ruta):
         v["publicado"], origen["publicado"] = g["anio"], "geek"
         if ref.get("publicado") == g["anio"]:
@@ -364,7 +373,7 @@ def _a_mano(v: dict, man: dict) -> None:
     for campo in manual_mod.DE_EXTRA:
         if campo in man:
             v[campo] = man[campo]
-            origen[{"publicado_mes": "publicado"}.get(campo, campo)] = "mano"
+            origen[{"publicado_mes": "publicado", "ext_titulo": "titulo"}.get(campo, campo)] = "mano"
     if "publicado" in man and "publicado_mes" not in man and origen.get("publicado") == "mano":
         v["publicado_mes"] = None  # el mes de otra fuente no vale para un año puesto a mano
     if "editorial" in man:
@@ -373,7 +382,7 @@ def _a_mano(v: dict, man: dict) -> None:
 
 
 COLS = ["publicado", "publicado_mes", "ext_editorial", "autores", "isbn", "geek_id", "geek_tipo", "ext_codigo", "ext_codigo_orden",
-        "origen"]
+        "ext_titulo", "origen"]
 
 
 def aplicar(con, ids: list[int] | None = None) -> int:
@@ -401,10 +410,10 @@ def aplicar(con, ids: list[int] | None = None) -> int:
     lista = list(candidatos)
     for i in range(0, len(lista), 500):
         trozo = lista[i:i + 500]
-        filas = con.execute(f"SELECT id, nombre, ruta, {', '.join(COLS)} FROM docs "
+        filas = con.execute(f"SELECT id, nombre, ruta, titulo, idioma, {', '.join(COLS)} FROM docs "
                             f"WHERE id IN ({','.join('?' * len(trozo))})", trozo)
         for f in filas:
-            nuevo = _efectivos(por_doc.get(f[0], {}), f["nombre"], f["ruta"])
+            nuevo = _efectivos(por_doc.get(f[0], {}), f["nombre"], f["ruta"], f["titulo"] or "", f["idioma"])
             if f[0] in a_mano:
                 _a_mano(nuevo, a_mano[f[0]])
             if any(nuevo[c] != f[c] for c in COLS):

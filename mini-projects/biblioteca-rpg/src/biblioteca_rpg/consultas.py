@@ -113,18 +113,18 @@ def buscar(con: sqlite3.Connection, filtros: dict, q: str | None, carpeta: str |
     if orden == "relevancia" and q and consulta_fts(q):
         # bm25 con más peso al título que a la carpeta
         sql_orden = (
-            "ORDER BY (SELECT bm25(docs_fts, 10.0, 2.0, 4.0, 1.0) FROM docs_fts "
-            "WHERE docs_fts MATCH ? AND rowid = docs.id), titulo COLLATE NOCASE"
+            "ORDER BY (SELECT bm25(docs_fts, 10.0, 10.0, 2.0, 4.0, 1.0) FROM docs_fts "
+            "WHERE docs_fts MATCH ? AND rowid = docs.id), COALESCE(ext_titulo, titulo) COLLATE NOCASE"
         )
         params_orden = [consulta_fts(q)]
     else:
         sql_orden = {
             "recientes": "ORDER BY llegado_en DESC, id DESC",
-            "anio": "ORDER BY COALESCE(publicado, anio) IS NULL, COALESCE(publicado, anio), titulo COLLATE NOCASE",
+            "anio": "ORDER BY COALESCE(publicado, anio) IS NULL, COALESCE(publicado, anio), COALESCE(ext_titulo, titulo) COLLATE NOCASE",
             "paginas": "ORDER BY paginas IS NULL, paginas DESC",
             # Los que no tienen código, al final; los que sí, por prefijo y número.
-            "codigo": f"ORDER BY {CODIGO_ORDEN} IS NULL, {CODIGO_ORDEN}, titulo COLLATE NOCASE",
-        }.get(orden, "ORDER BY titulo COLLATE NOCASE")
+            "codigo": f"ORDER BY {CODIGO_ORDEN} IS NULL, {CODIGO_ORDEN}, COALESCE(ext_titulo, titulo) COLLATE NOCASE",
+        }.get(orden, "ORDER BY COALESCE(ext_titulo, titulo) COLLATE NOCASE")
         params_orden = []
     desplaz = (max(pagina, 1) - 1) * POR_PAGINA
     filas = con.execute(

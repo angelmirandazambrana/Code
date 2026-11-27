@@ -176,7 +176,8 @@ def ficha(request: Request, doc_id: int):
     if not d:
         raise HTTPException(404, "No existe")
     hermanos = con.execute(
-        "SELECT id, titulo, portada FROM docs WHERE carpeta=? AND id<>? ORDER BY titulo COLLATE NOCASE LIMIT 24",
+        "SELECT id, COALESCE(ext_titulo, titulo) AS titulo, portada FROM docs WHERE carpeta=? AND id<>? "
+        "ORDER BY COALESCE(ext_titulo, titulo) COLLATE NOCASE LIMIT 24",
         (d["carpeta"], doc_id),
     ).fetchall()
     migas, acum = [], []
@@ -242,7 +243,7 @@ def _revisado(con, valor: str) -> dict | None:
     """El que se acaba de decidir (para el aviso «Guardado» con enlace para corregirlo)."""
     if not valor.isdigit():
         return None
-    fila = con.execute("SELECT d.id, d.titulo, e.estado, e.datos FROM docs d JOIN extra e ON e.doc_id=d.id "
+    fila = con.execute("SELECT d.id, COALESCE(d.ext_titulo, d.titulo) AS titulo, e.estado, e.datos FROM docs d JOIN extra e ON e.doc_id=d.id "
                        "AND e.fuente='geek' WHERE d.id=?", (int(valor),)).fetchone()
     if not fila or fila["estado"] not in ("aceptado", "rechazado"):
         return None
@@ -346,7 +347,7 @@ def revisar(request: Request, pagina: int = 1):
     total = con.execute("SELECT COUNT(*) FROM extra WHERE fuente='geek' AND estado='pendiente'").fetchone()[0]
     por_pagina = 30
     filas = con.execute(
-        "SELECT d.id, d.titulo, d.carpeta, d.sistema, d.editorial, d.ext_editorial, d.editorial_unif, d.publicado, d.anio, "
+        "SELECT d.id, COALESCE(d.ext_titulo, d.titulo) AS titulo, d.carpeta, d.sistema, d.editorial, d.ext_editorial, d.editorial_unif, d.publicado, d.anio, "
         "e.confianza, e.datos FROM extra e JOIN docs d ON d.id = e.doc_id "
         "WHERE e.fuente='geek' AND e.estado='pendiente' ORDER BY e.confianza DESC, d.id "
         f"LIMIT {por_pagina} OFFSET {(max(pagina, 1) - 1) * por_pagina}"
@@ -874,12 +875,12 @@ def api_sugerencias(q: str = ""):
     fts = consulta_fts(q)
     # Primero los que tienen las palabras en el título; si faltan, los que las tienen en la carpeta
     # ("cthulhu mon" -> los Monsters de Call of Cthulhu). Sin repetir el mismo título.
-    consultas = ["{titulo pdf_titulo} : (" + fts + ")", fts] if fts else []
+    consultas = ["{titulo ext_titulo pdf_titulo} : (" + fts + ")", fts] if fts else []
     for consulta in consultas:
         filas = con.execute(
-            "SELECT d.id, d.titulo, d.sistema, d.edicion, COALESCE(d.publicado, d.anio) AS anio "
+            "SELECT d.id, COALESCE(d.ext_titulo, d.titulo) AS titulo, d.sistema, d.edicion, COALESCE(d.publicado, d.anio) AS anio "
             "FROM docs_fts JOIN docs d ON d.id = docs_fts.rowid "
-            "WHERE docs_fts MATCH ? ORDER BY bm25(docs_fts, 10.0, 1.0, 4.0, 1.0) LIMIT 40",
+            "WHERE docs_fts MATCH ? ORDER BY bm25(docs_fts, 10.0, 10.0, 1.0, 4.0, 1.0) LIMIT 40",
             [consulta],
         ).fetchall()
         for f in filas:

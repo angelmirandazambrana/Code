@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_geek.html" import candidatos %}
-{% block titulo %}{{ d.titulo }} · Biblioteca{% endblock %}
+{% block titulo %}{{ d.ext_titulo or d.titulo }} · Biblioteca{% endblock %}
 {% block contenido %}
 <nav class="migas ficha-migas" aria-label="Carpeta">
   <a href="/">Todo</a>
@@ -9,12 +9,14 @@
 
 <article class="ficha">
   <div class="ficha-portada">
-    <a href="/pdf/{{ d.id }}/{{ d.nombre|qp }}" target="_blank" rel="noopener"><img src="/portada/{{ d.id }}.jpg" alt="Portada de {{ d.titulo }}"></a>
+    <a href="/pdf/{{ d.id }}/{{ d.nombre|qp }}" target="_blank" rel="noopener"><img src="/portada/{{ d.id }}.jpg" alt="Portada de {{ d.ext_titulo or d.titulo }}"></a>
   </div>
   <div class="ficha-datos">
     <p class="ficha-sistema">{% if d.sistema %}<a href="{{ filtro('sistema', d.sistema) }}">{{ d.sistema }}</a>{% else %}{{ d.categoria }}{% endif %}</p>
-    <h1>{{ d.titulo }}</h1>
-    {% if d.pdf_titulo and d.pdf_titulo|lower != d.titulo|lower %}<p class="tenue">Título interno del PDF: {{ d.pdf_titulo }}</p>{% endif %}
+    <h1>{{ d.ext_titulo or d.titulo }}</h1>
+    {% if d.ext_titulo %}<p class="tenue">{% if 'ext_titulo' in a_mano %}<span class="a-mano">escrito a mano</span>{% else %}<span class="segun">título según {{ origen.titulo }}</span>{% endif %}
+      {% if d.ext_titulo|lower != d.titulo|lower %} · en el fichero: {{ d.titulo }}{% endif %}</p>{% endif %}
+    {% if d.pdf_titulo and d.pdf_titulo|lower not in (d.titulo|lower, (d.ext_titulo or '')|lower) %}<p class="tenue">Título interno del PDF: {{ d.pdf_titulo }}</p>{% endif %}
 
     <div class="acciones">
       <a class="boton principal" href="/pdf/{{ d.id }}/{{ d.nombre|qp }}" {% if d.nombre|ext == 'PDF' %}target="_blank" rel="noopener">Abrir PDF{% else %}download>Descargar {{ d.nombre|ext }}{% endif %}</a>
@@ -91,6 +93,10 @@
         <p class="tenue">Escribe y elige de la lista los valores que ya hay en la biblioteca (o pon uno nuevo).
           Lo que escribas manda sobre lo deducido. Vacía un campo para volver al dato automático.</p>
         <div class="campos-editar">
+          <label class="ancho">{{ campos.ext_titulo }}
+            <input name="ext_titulo" value="{{ d.ext_titulo or '' }}" placeholder="{{ d.titulo }}" autocomplete="off">
+            <input type="hidden" name="antes_ext_titulo" value="{{ d.ext_titulo or '' }}">
+          </label>
         {% for campo in ['sistema', 'edicion', 'editorial', 'tipo', 'ambientacion', 'idioma', 'formato', 'autores'] %}
           {% set valor = valor_de(campo) or '' %}
           <label>{{ campos[campo] }}

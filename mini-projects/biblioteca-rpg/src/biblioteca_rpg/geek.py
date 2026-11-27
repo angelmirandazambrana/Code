@@ -420,6 +420,29 @@ def _sin_parentesis(n: str) -> str:
     return RE_ETIQUETA.sub("", n).strip() or n
 
 
+def titulo_de_ficha(elegido: dict, titulo_archivo: str = "") -> str | None:
+    """El nombre del libro según su ficha de RPGGeek, para mostrarlo en vez del del fichero.
+
+    De los nombres de la ficha (el principal y los alternativos), el más parecido al del fichero:
+    «Genius Guide to Loot 4 Less 4» -> «The Genius Guide to Loot 4 Less: Volume 4—Fantastic Footwear»
+    y no solo «Fantastic Footwear». Sin la etiqueta de sistema («… (Pathfinder)»). Las fichas de
+    BoardGameGeek son del juego, no de cada PDF (reglas, mapas…): de ahí no se toma."""
+    if elegido.get("tipo") == "boardgame" or not elegido.get("nombre"):
+        return None
+    nombres = [_sin_parentesis(n) for n in [elegido["nombre"], *(elegido.get("alternativos") or [])] if n]
+    base = limpiar_titulo(titulo_archivo)
+    if not base:
+        return nombres[0]
+    t = max(nombres, key=lambda n: _parecido(base, n))  # en empate, el principal (va primero)
+    # La serie, si el fichero la nombra y la ficha no: «Monster Classes - Fey» -> «Monster Classes: Fey».
+    nb, nt = f" {normalizar(base)} ", f" {normalizar(t)} "
+    for serie in elegido.get("serie") or []:
+        ns = normalizar(_sin_parentesis(serie))
+        if ns and f" {ns} " in nb and f" {ns} " not in nt:
+            return f"{_sin_parentesis(serie)}: {t}"
+    return t
+
+
 def es_parte_del_nombre(consulta: str, nombre: str) -> bool:
     """«Thin Blue Line» en «Thin Blue Line: Defenders of the Colonies», «A is for Assassin» en «Strike to
     the Heart: A is for Assassin»: el título es el principio del nombre o una de sus partes. No lo es

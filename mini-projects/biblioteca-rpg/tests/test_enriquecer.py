@@ -296,3 +296,21 @@ def test_lo_confirmado_en_la_carpeta_ayuda():
     doc = {"titulo": "Star Drive Arms & Equipment Guide", "sistema": "Star Drive"}
     q = g.variantes(doc["titulo"], doc["sistema"])
     assert g.puntuar({**doc, "vecinos": perfil}, ficha, q) > g.puntuar(doc, ficha, q)
+
+
+def test_titulo_del_libro_segun_la_ficha():
+    from biblioteca_rpg.enriquecer import _efectivos
+    from biblioteca_rpg.geek import titulo_de_ficha
+    g = {"tipo": "rpgitem", "nombre": "Fantastic Footwear",
+         "alternativos": ["The Genius Guide to Loot 4 Less: Volume 4—Fantastic Footwear"]}
+    assert titulo_de_ficha(g, "Genius Guide to Loot 4 Less 4") == g["alternativos"][0]
+    assert titulo_de_ficha({"tipo": "rpgitem", "nombre": "The Temple of Jewels and Mirrors (Pathfinder)"},
+                           "SH2 The Temple of Jewels and Mirrors") == "The Temple of Jewels and Mirrors"
+    assert titulo_de_ficha({"tipo": "rpgitem", "nombre": "Fey", "serie": ["Monster Classes"]},
+                           "Monster Classes - Fey") == "Monster Classes: Fey"
+    assert titulo_de_ficha({"tipo": "boardgame", "nombre": "Advanced Squad Leader"}, "ASL Chapter B") is None
+    geek = {"geek": {"elegido": {"tipo": "rpgitem", "nombre": "Hellgate Keep"}}}
+    v = _efectivos(geek, "x.pdf", titulo="TSR 9562 Hellgate Keep")
+    assert v["ext_titulo"] == "Hellgate Keep" and '"titulo": "geek"' in v["origen"]
+    assert _efectivos(geek, "x.pdf", titulo="Hellgate Keep", idioma="Español")["ext_titulo"] is None  # traducción
+    assert _efectivos({"ref": {"titulo": "Hangman's Noose"}}, "x.pdf", titulo="U2")["ext_titulo"] == "Hangman's Noose"

@@ -50,7 +50,7 @@ def proponer(con: sqlite3.Connection, texto: str, editorial: str | None = None,
         return vacio
     consulta = " OR ".join(f'"{p}"' for p in ps)
     filas = con.execute(
-        "SELECT d.id, d.carpeta, COALESCE(d.editorial, d.ext_editorial) AS ed, bm25(docs_fts, 10.0, 3.0, 4.0, 1.0) AS r "
+        "SELECT d.id, d.carpeta, COALESCE(d.editorial, d.ext_editorial) AS ed, bm25(docs_fts, 10.0, 10.0, 3.0, 4.0, 1.0) AS r "
         "FROM docs_fts JOIN docs d ON d.id = docs_fts.rowid WHERE docs_fts MATCH ? ORDER BY r LIMIT ?",
         (consulta, VECINOS + 1),
     ).fetchall()

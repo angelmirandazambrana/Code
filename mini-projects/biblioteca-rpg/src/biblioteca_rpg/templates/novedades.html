@@ -24,7 +24,7 @@
         <li class="tarjeta">
           <a href="/libro/{{ d.id }}">
             <div class="portada"><img src="/portada/{{ d.id }}.jpg" alt="" loading="lazy" decoding="async"></div>
-            <h2 title="{{ d.titulo }}">{{ d.titulo }}</h2>
+            <h2 title="{{ d.ext_titulo or d.titulo }}">{{ d.ext_titulo or d.titulo }}</h2>
             <p class="linea">{{ d.sistema or d.categoria or '' }}{% if d.edicion %} · {{ d.edicion }}{% endif %}</p>
             <p class="linea tenue" title="{{ d.carpeta }}">{{ d.carpeta }}</p>
           </a>

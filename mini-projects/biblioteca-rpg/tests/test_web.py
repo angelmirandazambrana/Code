@@ -240,3 +240,28 @@ def test_revisar_bgg_y_pasar_al_siguiente(cliente):
     r = cliente.post(f"/revisar/{ids[1]}?accion=rechazar&volver=/revisar/siguiente?tras={ids[1]}",
                      follow_redirects=True)
     assert str(r.url).endswith("/revisar")
+
+
+def test_titulo_del_libro(cliente):
+    import re
+
+    from biblioteca_rpg import config, db, enriquecer
+    r = cliente.get("/", params={"q": "Dragon 100"})
+    doc_id = int(re.search(r'href="/libro/(\d+)"', r.text).group(1))
+    con = db.conectar(config.cargar().db)
+    titulo = con.execute("SELECT titulo FROM docs WHERE id=?", (doc_id,)).fetchone()[0]
+    # De RPGGeek: se ve en la ficha y en la lista, y se encuentra buscándolo; el del fichero sigue ahí.
+    with con:
+        con.execute("INSERT INTO extra (doc_id, fuente, estado, datos) VALUES (?, 'geek', 'aceptado', ?)",
+                    (doc_id, '{"elegido": {"id": 1, "tipo": "rpgitem", "nombre": "Dragon Magazine #100 (AD&D 1st Edition)"}}'))
+        enriquecer.aplicar(con, [doc_id])
+    assert con.execute("SELECT ext_titulo FROM docs WHERE id=?", (doc_id,)).fetchone()[0] == "Dragon Magazine #100"
+    ficha = cliente.get(f"/libro/{doc_id}").text
+    assert "<h1>Dragon Magazine #100</h1>" in ficha and "según RPGGeek" in ficha and f"en el fichero: {titulo}" in ficha
+    assert "Dragon Magazine #100" in cliente.get("/", params={"q": "magazine"}).text
+    # A mano manda; vaciarlo devuelve el de RPGGeek.
+    cliente.post(f"/libro/{doc_id}/datos", data={"ext_titulo": "El dragón cien", "antes_ext_titulo": "Dragon Magazine #100"})
+    assert "<h1>El dragón cien</h1>" in cliente.get(f"/libro/{doc_id}").text
+    assert f'href="/libro/{doc_id}"' in cliente.get("/", params={"q": "dragón cien"}).text
+    cliente.post(f"/libro/{doc_id}/datos", data={"ext_titulo": "", "antes_ext_titulo": "El dragón cien"})
+    assert con.execute("SELECT ext_titulo FROM docs WHERE id=?", (doc_id,)).fetchone()[0] == "Dragon Magazine #100"

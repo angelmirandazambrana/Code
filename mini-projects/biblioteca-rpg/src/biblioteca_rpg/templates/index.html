@@ -85,7 +85,7 @@
           <li class="tarjeta">
             <a href="/libro/{{ d.id }}">
               <div class="portada"><img src="/portada/{{ d.id }}.jpg" alt="" loading="lazy" decoding="async"></div>
-              <h2 title="{{ d.titulo }}">{{ d.titulo }}</h2>
+              <h2 title="{{ d.ext_titulo or d.titulo }}">{{ d.ext_titulo or d.titulo }}</h2>
               <p class="linea">{{ d.sistema or d.categoria or '' }}{% if d.edicion %} · {{ d.edicion }}{% endif %}</p>
               {% set pie = [(d.nombre|ext) if d.nombre|ext != 'PDF' else None, d.codigo or d.ext_codigo, d.editorial_unif, d.publicado or d.anio, (d.paginas ~ ' pág.') if d.paginas else None]|select|join(' · ') %}
               <p class="linea tenue">{{ pie }}&nbsp;</p>

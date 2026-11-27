@@ -387,6 +387,7 @@ form.en-linea { display: inline; margin: 0; }
 .editar-datos form { margin-top: .75rem; }
 .campos-editar { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: .6rem 1rem; margin: .5rem 0 1rem; }
 .campos-editar label { display: flex; flex-direction: column; gap: .25rem; font-size: 13px; color: var(--tenue); }
+.campos-editar label.ancho { grid-column: 1 / -1; }
 .campos-editar input, .campos-editar select { font: inherit; font-size: 15px; padding: .4rem .5rem; color: inherit;
   background: var(--superficie); border: 1px solid var(--borde); border-radius: 6px; }
 
