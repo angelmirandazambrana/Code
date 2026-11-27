@@ -323,3 +323,22 @@ def test_entrada_datos_del_libro_pasan_a_la_ficha(cliente, tmp_path):
     assert d and d["ruta"].endswith("/Pruebas/Masters of Arms - 3.5.pdf")
     assert (d["ext_titulo"], d["editorial"]) == ("Masters of Arms: 3.5", "Second World Simulations")
     assert "escrito a mano" in cliente.get(f"/libro/{d['id']}").text
+
+
+def test_carpetas_con_guion_bajo_son_destinos():
+    from biblioteca_rpg.clasificador import es_destino
+    from biblioteca_rpg.web import hijas_de_ruta
+    assert es_destino("RPG/_GM Books") and es_destino("RPG/_Reference/Maps")
+    assert not es_destino("RPG/D&D/_Por clasificar") and not es_destino("_Inbox/x") and not es_destino("")
+    arbol = {"rpg": [("RPG/_GM Books", 1536, 3), ("RPG/Traveller", 900, 5)]}
+    assert hijas_de_ruta(arbol, "RPG/_GM books")["exacta"] == "RPG/_GM Books"  # sin distinguir mayúsculas
+
+
+def test_destino_con_las_mayusculas_de_la_carpeta_que_ya_existe(tmp_path):
+    from types import SimpleNamespace
+
+    from biblioteca_rpg.entrada import destino_valido
+    (tmp_path / "RPG" / "_GM Books" / "Advice").mkdir(parents=True)
+    cfg = SimpleNamespace(raiz=tmp_path, areas=["RPG"])
+    assert destino_valido(cfg, "rpg/_GM books") == "RPG/_GM Books"
+    assert destino_valido(cfg, "RPG/_gm books/advice/Nueva") == "RPG/_GM Books/Advice/Nueva"

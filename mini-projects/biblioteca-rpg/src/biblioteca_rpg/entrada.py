@@ -617,10 +617,28 @@ def destino_valido(cfg, destino: str) -> str | None:
         return None
     if any(c in x for x in partes for c in '<>:"|?*'):
         return None
-    d = "/".join(partes)
+    d = "/".join(_como_en_disco(cfg.raiz, partes))
     if config_mod.en_areas(cfg.areas, d) or d == DUPLICADOS or d.startswith(DUPLICADOS + "/"):
         return d
     return None
+
+
+def _como_en_disco(raiz: Path, partes: list[str]) -> list[str]:
+    """«RPG/_GM books» -> «RPG/_GM Books» si esa ya existe: en el servidor las mayúsculas cuentan
+    y se crearía otra carpeta al lado. Lo que aún no existe se queda como está escrito."""
+    res, actual = [], raiz
+    for i, p in enumerate(partes):
+        try:
+            hijas = [h.name for h in actual.iterdir() if h.is_dir()]
+        except OSError:
+            return res + partes[i:]
+        if p not in hijas:
+            p = next((h for h in hijas if h.lower() == p.lower()), p)
+        res.append(p)
+        actual = actual / p
+        if not actual.is_dir():
+            return res + partes[i + 1:]
+    return res
 
 
 def _fusionar(origen: Path, destino: Path, cfg, log: Registro) -> list[str]:

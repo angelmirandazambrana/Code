@@ -36,9 +36,17 @@ def palabras(texto: str) -> list[str]:
     return res[:20]
 
 
+# Carpetas de trabajo (de paso, no destinos). Las demás que empiezan por «_» («_GM Books»,
+# «_Reference», «_Novelas»…) son carpetas de verdad: el «_» solo las pone arriba al ordenar.
+CARPETAS_DE_TRABAJO = {"_por clasificar", "_revisar", "__macosx", "_inbox", "_duplicados", "_papelera"}
+
+
+def es_destino(carpeta: str) -> bool:
+    return bool(carpeta) and not any(s.lower() in CARPETAS_DE_TRABAJO for s in carpeta.split("/"))
+
+
 def _valida(carpeta: str) -> bool:
-    # Carpetas de trabajo de la reorganización: no son destinos.
-    return bool(carpeta) and "/_" not in "/" + carpeta
+    return es_destino(carpeta)
 
 
 def proponer(con: sqlite3.Connection, texto: str, editorial: str | None = None,

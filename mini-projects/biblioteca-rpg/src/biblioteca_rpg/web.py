@@ -20,7 +20,7 @@ from . import config as config_mod
 from . import estadisticas as est_mod
 from . import explicar as explicar_mod
 from . import manual as manual_mod
-from .clasificador import POR_CLASIFICAR
+from .clasificador import POR_CLASIFICAR, es_destino
 from .consultas import FACETAS, NO, ORDENES, SIN_VALOR, buscar, consulta_fts, facetas, subcarpetas
 from .db import conectar
 from .enriquecer import aplicar
@@ -787,7 +787,7 @@ def _indice_carpetas(con) -> list[tuple[str, str, str, int]]:
         except sqlite3.OperationalError:
             pass  # aún no hay índice de packs
         return [(c, normalizar(c), normalizar(c.rsplit("/", 1)[-1]), n)
-                for c, n in totales.items() if c and "/_" not in "/" + c]
+                for c, n in totales.items() if es_destino(c)]
     return _cacheado(con, ("carpetas",), calcular)
 
 
@@ -882,7 +882,7 @@ def _carpetas_por_ficheros(con, q: str, n: int = 12) -> list[dict]:
         return []
     totales = {c: k for c, _, _, k in _indice_carpetas(con)}
     return [{"carpeta": f["carpeta"], "n": totales.get(f["carpeta"], f["k"]), "coinciden": f["k"], "ejemplo": f["ejemplo"]}
-            for f in filas if f["carpeta"] and "/_" not in "/" + f["carpeta"]][:n]
+            for f in filas if es_destino(f["carpeta"] or "")][:n]
 
 
 # Facetas que se sugieren al escribir en el buscador.

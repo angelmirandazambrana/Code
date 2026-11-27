@@ -15,6 +15,7 @@ import os
 import re
 import time
 
+from .clasificador import es_destino
 from .juegos_lotes import MODELO
 from .llm import ESQUEMA_USO, PRECIOS, gastado_este_mes, texto_inicio
 from .texto_pdf import normalizar
@@ -106,7 +107,7 @@ def carpetas_candidatas(carpetas: list[tuple[str, int]], explicacion: str, e: di
     """Las carpetas que pueden servir: con palabras en común y el árbol de sus juegos."""
     llm = e.get("llm") or {}
     buscadas = _palabras(explicacion, e.get("nombre", ""), e.get("pdf_titulo") or "", llm.get("juego") or "")
-    normal = [(c, n, normalizar(c)) for c, n in carpetas if "/_" not in "/" + c]
+    normal = [(c, n, normalizar(c)) for c, n in carpetas if es_destino(c)]
     puntos = []
     for c, n, norm in normal:
         tramos = set(norm.split())
